@@ -6,7 +6,7 @@
             style="display: block; margin: 0 auto" />
 
 <h1>Sora</h1>
-<p>A simple, intuitive, Roblox admins cript</p>
+<p>A simple, intuitive, Roblox admin script</p>
 </div>
 
 ## Features
