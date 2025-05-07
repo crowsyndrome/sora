@@ -1,4 +1,11 @@
-# Sora - Lightweight Roblox Utility
+
+<img src="assets/logo.svg" 
+        alt="Picture" 
+        width="150" 
+        height="150" 
+        style="display: block; margin: 0 auto" />
+
+<h1 style="text-align:center;">Sora</h1>
 
 ## Features
 *   **Player & Chat Logs:** See live chat and who joins/leaves the game.
