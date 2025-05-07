@@ -7,10 +7,10 @@ if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
 
--- if getgenv().SORA_LOADED then
--- 	warn("Sora already loaded. Please unload first")
--- 	return
--- end
+if getgenv().SORA_LOADED then
+	warn("Sora already loaded. Please unload first")
+	return
+end
 
 getgenv().SORA_LOADED = true
 
@@ -20,7 +20,7 @@ local Sora = {
 		teleport = Enum.KeyCode.LeftAlt,
 	},
 	customization = {
-		accent = Color3.fromRGB(131, 195, 248), --Color3.fromRGB(131, 195, 248)
+		accent = Color3.fromRGB(131, 195, 248),
 		notificationSound = "rbxassetid://89087762338808",
 		bootSound = "rbxassetid://136242004757394",
 		font = "rbxasset://fonts/families/SourceSansPro.json",
@@ -118,7 +118,7 @@ local colors = {
 	cyan = Color3.fromRGB(127, 255, 255),
 	magenta = Color3.fromRGB(255, 127, 255),
 	white = Color3.fromRGB(255, 255, 255),
-	black = Color3.fromRGB(127, 127, 127),
+	black = Color3.fromRGB(39, 39, 39),
 }
 
 local color = {}
@@ -192,7 +192,7 @@ local function disconnectAllManagedConnections()
 end
 
 local function httpGetJson(url)
-	local ok, raw = pcall(game.HttpGet, HttpService, url)
+	local ok, raw = pcall(game.HttpGet, url)
 	if not ok then
 		return nil
 	end
@@ -1153,14 +1153,6 @@ function Section.addButton(self, buttonName, callback)
 
 	addConnection(textbutton.MouseButton1Click, callback)
 
-	-- create("UIPadding", "UIPaddingButton", {
-	-- 	PaddingBottom = UDim.new(0, 3),
-	-- 	PaddingLeft = UDim.new(0, 3),
-	-- 	PaddingRight = UDim.new(0, 3),
-	-- 	PaddingTop = UDim.new(0, 3),
-	-- 	Parent = button,
-	-- })
-
 	create("UIStroke", "UIStroke", {
 		Color = Color3.fromRGB(32, 32, 36),
 		Parent = button,
@@ -1647,7 +1639,7 @@ function Section.addDropdown(self, values, callback, defaultValue)
 			Parent = optionFrame,
 		})
 
-		local btn = create("TextButton", "TextButton", {
+		local button = create("TextButton", "TextButton", {
 			BackgroundTransparency = 1,
 			FontFace = Font.new(Sora.customization.font),
 			Size = newUDim2(1, 0, 1, 0),
@@ -1658,7 +1650,7 @@ function Section.addDropdown(self, values, callback, defaultValue)
 			Parent = optionFrame,
 		})
 
-		btn.MouseButton1Click:Connect(function()
+		button.MouseButton1Click:Connect(function()
 			for _, obj in holder:GetChildren() do
 				if obj:IsA("Frame") then
 					animate(
@@ -1767,10 +1759,6 @@ local typeValidators = {
 		local foundPlayers = {}
 
 		for _, player in Players:GetPlayers() do
-			if player == Player then
-				continue
-			end
-
 			local lowerName = lower(player.Name)
 			local lowerDisplayName = lower(player.DisplayName)
 
@@ -1827,7 +1815,6 @@ local function parseArgument(valueString, argDefinition)
 		end
 	end
 
-	-- Validate the argument value
 	local validator = typeValidators[argType]
 	if validator then
 		return validator(valueString, argName)
@@ -1990,14 +1977,17 @@ function executeCommand(commandString)
 		if not success then
 			return false
 		end
+
 		parsedArgs[argDef.name] = resultOrError
 	end
 
-	local success, err = pcall(commandData.ExecuteFunction, parsedArgs)
+	local ok, ret = xpcall(function()
+		return commandData.ExecuteFunction(parsedArgs)
+	end, debug.traceback)
 
-	if not success then
-		notify("Error executing command " .. color.red(primaryAlias) .. ": " .. color.cyan(tostring(err)))
-		warn(err)
+	if not ok then
+		notify("Error executing '%s':\n%s"):format(primaryAlias, ret)
+		warn(("Error executing '%s':\n%s"):format(primaryAlias, ret))
 		return false
 	end
 
@@ -2398,7 +2388,7 @@ local function updatePrediction(txt)
 		local lowerPartial = partial:lower()
 
 		local bestPLen, bestPlayer, matchType = math.huge
-		for _, player in game.Players:GetPlayers() do
+		for _, player in Players:GetPlayers() do
 			local displayName, userName = player.DisplayName, player.Name
 			local lowerDisplayName, lowerUserName = displayName:lower(), userName:lower()
 
@@ -2634,7 +2624,7 @@ local MAX_CLICK_DISTANCE = 1500
 local VALIDATE_HEIGHT = 3
 do
 	local function getRootClearance(rootPart, params)
-		local downHit = workspace:Raycast(rootPart.Position, Vector3.new(0, -1000, 0), params)
+		local downHit = workspace:Raycast(rootPart.Position, newVector3(0, -1000, 0), params)
 		if downHit then
 			return rootPart.Position.Y - downHit.Position.Y
 		else
@@ -2672,22 +2662,22 @@ do
 		end
 
 		local groundHit = workspace:Raycast(
-			hit.Position + Vector3.new(0, VALIDATE_HEIGHT, 0),
-			Vector3.new(0, -VALIDATE_HEIGHT - 1000, 0),
+			hit.Position + newVector3(0, VALIDATE_HEIGHT, 0),
+			newVector3(0, -VALIDATE_HEIGHT - 1000, 0),
 			params
 		)
 		local groundPos = (groundHit and groundHit.Position) or hit.Position
 
 		local clearance = getRootClearance(rootPart, params)
 		local targetPos = groundPos
-			+ Vector3.new(0, clearance + (humanoid.RigType == Enum.HumanoidRigType.R6 and 1.5 or 0), 0)
+			+ newVector3(0, clearance + (humanoid.RigType == Enum.HumanoidRigType.R6 and 1.5 or 0), 0)
 
 		if humanoid.Sit then
 			humanoid.Sit = false
 		end
 
 		local look = cam.CFrame.LookVector
-		local forward = Vector3.new(look.X, 0, look.Z)
+		local forward = newVector3(look.X, 0, look.Z)
 		if forward.Magnitude < 0.1 then
 			forward = rootPart.CFrame.LookVector
 		end
