@@ -1,14 +1,13 @@
-<p align="center">
+<div align="center">
     <img src="assets/logo.svg" 
             alt="Picture" 
             width="150" 
             height="150" 
             style="display: block; margin: 0 auto" />
-</p>
 
-<p align="center">
-    <h1 style="text-align:center;">Sora</h1>
-</p>
+<h1>Sora</h1>
+<p>A simple, intuitive, Roblox admins cript</p>
+</div>
 
 ## Features
 *   **Player & Chat Logs:** See live chat and who joins/leaves the game.
