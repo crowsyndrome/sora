@@ -24,6 +24,7 @@
 Sora is a script that you run with a Roblox script executor.
 
 1.  **Copy the Loadstring:**
+    
     ```lua
     loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/crowsyndrome/sora/refs/heads/main/main.luau"))()
     ```
