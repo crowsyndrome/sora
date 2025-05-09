@@ -3516,7 +3516,7 @@ createCommand({ "spin" }, {
 		currentRoot:FindFirstChild("Spin"):Destroy()
 	end
 
-	if args.value >= 0 then
+	if args.value > 0 then
 		create("BodyAngularVelocity", "Spin", {
 			Parent = currentRoot,
 			MaxTorque = Vector3.new(0, math.huge, 0),
@@ -3525,6 +3525,12 @@ createCommand({ "spin" }, {
 
 		notify("Started spinning!")
 		return
+	else
+		if currentRoot:FindFirstChild("Spin") then
+			currentRoot:FindFirstChild("Spin"):Destroy()
+		end
+
+		notify("Stopped spinning.")
 	end
 
 	notify("Value must be greater than 0!")
