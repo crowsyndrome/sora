@@ -18,6 +18,9 @@ local Sora = {
 	keys = {
 		prefix = Enum.KeyCode.Quote,
 		teleport = Enum.KeyCode.LeftAlt,
+		boost = Enum.KeyCode.C,
+		extra_boost = Enum.KeyCode.LeftControl,
+		alt_dash = Enum.KeyCode.LeftAlt,
 	},
 	customization = {
 		accent = Color3.fromRGB(131, 195, 248),
@@ -85,12 +88,13 @@ do
 	rad = math.rad
 end
 
-local newUDim2, newCFrame, newVector3, newVector2
+local newUDim2, newCFrame, newVector3, newVector2, newAngles
 do
 	newUDim2 = UDim2.new
 	newCFrame = CFrame.new
 	newVector3 = Vector3.new
 	newVector2 = Vector2.new
+	newAngles = CFrame.Angles
 end
 
 local queue_on_teleport = queue_on_teleport or function() end
@@ -103,7 +107,7 @@ local function animate(object, speed, easingStyle, properties, easingDirection)
 
 	local info = TweenInfo.new(speed, Enum.EasingStyle[easingStyle], Enum.EasingDirection[actualEasingDirection])
 
-	local tween: Tween = TweenService:Create(object, info, properties)
+	local tween = TweenService:Create(object, info, properties)
 	tween:Play()
 
 	return tween
@@ -1071,7 +1075,7 @@ function Section.addViewport(self, object, autoSpin)
 	local spin = 0
 
 	local function updateCam()
-		local rot = CFrame.Angles(0, spin, 0) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, 0)
+		local rot = newAngles(0, spin, 0) * newAngles(0, yaw, 0) * newAngles(pitch, 0, 0)
 
 		local camPos = pivotPos + rot:VectorToWorldSpace(newVector3(0, 0, dist))
 		camera.CFrame = CFrame.lookAt(camPos, pivotPos, newVector3(0, 1, 0))
@@ -2033,7 +2037,7 @@ function executeCommand(commandString)
 	end, debug.traceback)
 
 	if not ok then
-		notify("Error executing '%s':\n%s"):format(primaryAlias, ret)
+		notify(("Error executing '%s':\n%s"):format(primaryAlias, ret))
 		warn(("Error executing '%s':\n%s"):format(primaryAlias, ret))
 		return false
 	end
@@ -2664,6 +2668,57 @@ addConnection(UserInputService.InputBegan, function(entered, gameProcessedEvent)
 		delay(0, openRunner)
 	end
 end)
+
+local NORMAL_DASH_SPEED = 125 -- studs/second
+local BOOST_DASH_SPEED = 250 -- studs/second with LeftCtrl
+do
+	local dashActive = false
+	local dashY = nil -- Y we lock to while dashing
+
+	addConnection(UserInputService.InputBegan, function(_input, gameProcessed)
+		if gameProcessed or _input.KeyCode ~= Sora.keys.boost then
+			return
+		end
+
+		dashActive = true
+		dashY = currentRoot.Position.Y
+		currentRoot.Anchored = true
+
+		executeCommand("noclip")
+	end)
+
+	addConnection(UserInputService.InputEnded, function(_input, gameProcessed)
+		if gameProcessed or _input.KeyCode ~= Sora.keys.boost then
+			return
+		end
+
+		dashActive = false
+		currentRoot.Anchored = false
+
+		executeCommand("clip")
+	end)
+
+	addConnection(RunService.Heartbeat, function(dt)
+		if not dashActive or not currentHumanoid then
+			return
+		end
+
+		local moveDir = currentHumanoid.MoveDirection
+		if moveDir.Magnitude == 0 then
+			return
+		end
+
+		local speed = UserInputService:IsKeyDown(Sora.keys.extra_boost) and BOOST_DASH_SPEED or NORMAL_DASH_SPEED
+		local disp = newVector3(moveDir.X, 0, moveDir.Z).Unit * speed * dt
+
+		currentCharacter:TranslateBy(disp)
+
+		if currentRoot.Position.Y ~= dashY then
+			currentRoot.CFrame = newCFrame(currentRoot.Position.X, dashY, currentRoot.Position.Z)
+				* newAngles(0, currentRoot.Orientation.Y * math.pi / 180, 0)
+		end
+	end)
+end
 
 local MAX_CLICK_DISTANCE = 1500
 local VALIDATE_HEIGHT = 3
@@ -3447,8 +3502,6 @@ do
 		end)
 
 		applyToCharacter(currentCharacter)
-
-		notify("Noclip enabled")
 	end
 
 	local function disableNoclip()
@@ -3460,14 +3513,12 @@ do
 		clearConnections()
 
 		if currentCharacter then
-			for _, part in currentCharacter:GetDescendants() do
+			for _, part in currentCharacter:GetChildren() do
 				if part:IsA("BasePart") and part.Name == "Torso" or part.Name == "Head" then
 					part.CanCollide = true
 				end
 			end
 		end
-
-		notify("Noclip disabled")
 	end
 
 	createCommand({ "noclip", "nc" }, nil, function()
@@ -3645,7 +3696,7 @@ createCommand({ "flip" }, nil, function()
 	local hrp = character:FindFirstChild("HumanoidRootPart")
 
 	if hrp then
-		hrp.CFrame = hrp.CFrame * CFrame.Angles(0, 0, math.pi)
+		hrp.CFrame = hrp.CFrame * newAngles(0, 0, math.pi)
 		notify("Character flipped 180 degrees")
 	else
 		notify(format("%s not found.", tostring(color.red("HumanoidRootPart"))))
