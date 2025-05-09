@@ -39,7 +39,6 @@ local Services = setmetatable({}, {
 })
 
 local VoiceChatInternal = Services.VoiceChatInternal
-local VoiceChatService = Services.VoiceChatService
 local UserInputService = Services.UserInputService
 local TeleportService = Services.TeleportService
 local TweenService = Services.TweenService
@@ -48,7 +47,7 @@ local RunService = Services.RunService
 local Players = Services.Players
 
 local Player = Players.LocalPlayer
-local currentCharacter, currentHumanoid
+local currentCharacter, currentHumanoid, currentRoot
 
 local sleep, delay, newThread
 do
@@ -225,7 +224,8 @@ end
 
 local function onCharacterAdded(character)
 	currentCharacter = character or Player.CharacterAdded:Wait()
-	currentHumanoid = character:WaitForChild("Humanoid", 5)
+	currentHumanoid = currentCharacter:WaitForChild("Humanoid", 5)
+	currentRoot = currentCharacter:WaitForChild("HumanoidRootPart", 5)
 end
 
 Player.CharacterAdded:Connect(onCharacterAdded)
@@ -386,12 +386,20 @@ local function notify(...)
 	end)
 end
 
+local orbiting = false
 local EDGE_MARGIN = 8
 local MIN_SIZE = newVector2(120, 80)
-local orbiting = false
+
+local SWAY_FACTOR = 0.2 -- How much sway per pixel/sec of mouse movement
+local MAX_SWAY_ANGLE = 25 -- Maximum degrees of sway
+local SWAY_RETURN_SPEED = 8 -- How quickly it returns to 0 rotation (higher is faster)
 
 local function makeDraggable(guiObject)
 	local screenGui = guiObject:FindFirstAncestorWhichIsA("ScreenGui")
+	if not screenGui then
+		warn("makeDraggable: guiObject is not a descendant of a ScreenGui!")
+		return
+	end
 
 	local function toV2(input): Vector2
 		return newVector2(input.Position.X, input.Position.Y)
@@ -425,6 +433,10 @@ local function makeDraggable(guiObject)
 	local startTopLeft = Vector2.zero
 	local startSize = Vector2.zero
 
+	local lastMouseX = 0
+	local targetSwayAngle = 0
+	local currentSwayAngle = 0
+
 	guiObject.InputBegan:Connect(function(input)
 		if
 			input.UserInputType ~= Enum.UserInputType.MouseButton1
@@ -445,17 +457,23 @@ local function makeDraggable(guiObject)
 			resizeEdges = edgesHit
 		else
 			dragging = true
+			lastMouseX = cursor.X
 		end
 
-		input.Changed:Connect(function()
+		local inputChangedConnection
+		inputChangedConnection = input.Changed:Connect(function()
 			if input.UserInputState == Enum.UserInputState.End then
 				dragging = false
 				resizing = false
+
+				if inputChangedConnection then
+					inputChangedConnection:Disconnect()
+				end
 			end
 		end)
 	end)
 
-	UserInputService.InputChanged:Connect(function(input)
+	addConnection(UserInputService.InputChanged, function(input)
 		if
 			input.UserInputType ~= Enum.UserInputType.MouseMovement
 			and input.UserInputType ~= Enum.UserInputType.Touch
@@ -466,8 +484,8 @@ local function makeDraggable(guiObject)
 		local cursor = toV2(input)
 
 		if dragging then
-			local delta = cursor - startCursor
-			local newTopLeft = startTopLeft + delta
+			local totalDelta = cursor - startCursor
+			local newTopLeft = startTopLeft + totalDelta
 
 			local scr = screenGui.AbsoluteSize
 			newTopLeft =
@@ -476,6 +494,11 @@ local function makeDraggable(guiObject)
 			if not orbiting then
 				guiObject.Position = topLeftToUDim(newTopLeft, startSize, guiObject.AnchorPoint)
 			end
+
+			local mouseDeltaX = cursor.X - lastMouseX
+			targetSwayAngle = mouseDeltaX * SWAY_FACTOR
+			targetSwayAngle = clamp(targetSwayAngle, -MAX_SWAY_ANGLE, MAX_SWAY_ANGLE)
+			lastMouseX = cursor.X
 		elseif resizing then
 			local delta = cursor - startCursor
 			local newTL = startTopLeft
@@ -513,10 +536,34 @@ local function makeDraggable(guiObject)
 			end
 
 			local scr = screenGui.AbsoluteSize
+			if scr.X < newSize.X then
+				newSize = newVector2(scr.X, newSize.Y)
+			end
+
+			if scr.Y < newSize.Y then
+				newSize = newVector2(newSize.X, scr.Y)
+			end
+
 			newTL = newVector2(clamp(newTL.X, 0, scr.X - newSize.X), clamp(newTL.Y, 0, scr.Y - newSize.Y))
 
 			guiObject.Size = UDim2.fromOffset(newSize.X, newSize.Y)
 			guiObject.Position = topLeftToUDim(newTL, newSize, guiObject.AnchorPoint)
+		end
+	end)
+
+	addConnection(RunService.RenderStepped, function(deltaTime)
+		local effectiveTargetAngle = 0
+		if dragging then
+			effectiveTargetAngle = targetSwayAngle
+		end
+
+		currentSwayAngle = currentSwayAngle + (effectiveTargetAngle - currentSwayAngle) * SWAY_RETURN_SPEED * deltaTime
+		guiObject.Rotation = currentSwayAngle
+
+		if not dragging and math.abs(currentSwayAngle) < 0.01 then
+			currentSwayAngle = 0
+			guiObject.Rotation = 0
+			targetSwayAngle = 0
 		end
 	end)
 end
@@ -2290,6 +2337,7 @@ local function closeSuggestion()
 
 		suggestion.Position = currentPos
 	end)
+
 	posTween:Play()
 end
 
@@ -2428,7 +2476,6 @@ local function updatePrediction(txt)
 			end
 			return
 		else
-			-- hide popup and leave
 			if suggestion.Visible then
 				closeSuggestion()
 			end
@@ -2458,9 +2505,7 @@ addConnection(input:GetPropertyChangedSignal("Text"), function()
 	_busy = true
 
 	local txt = input.Text:gsub(keyCodeToString(Sora.keys.prefix), "")
-
 	local wantsTrailing = txt:sub(-1) == " "
-
 	txt = txt
 		:gsub("^%s+", "") -- leading
 		:gsub("%s+", " ") -- interior
@@ -2633,6 +2678,40 @@ do
 		end
 	end
 
+	local function getFirstOpaqueHit(origin, direction, params)
+		local maxDist = MAX_CLICK_DISTANCE
+		local dirUnit = direction.Unit
+		local traveled = 0
+		local startCFrame = origin
+
+		params.FilterDescendantsInstances = params.FilterDescendantsInstances or {}
+
+		while traveled < maxDist do
+			local result = workspace:Raycast(startCFrame, dirUnit * (maxDist - traveled), params)
+			if not result then
+				return nil
+			end
+
+			local part = result.Instance
+			if part.Transparency < 1 or not part.CanCollide then
+				return result
+			end
+
+			local hitPos = result.Position
+			local segmentLen = (hitPos - origin).Magnitude
+			traveled = segmentLen
+			if traveled >= maxDist then
+				return nil
+			end
+
+			startCFrame = hitPos + dirUnit * 0.1
+
+			table.insert(params.FilterDescendantsInstances, part)
+		end
+
+		return nil
+	end
+
 	local function clickTeleport(_input, gameProcessed)
 		if
 			gameProcessed
@@ -2644,7 +2723,7 @@ do
 
 		local character = currentCharacter
 		local humanoid = currentHumanoid
-		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		local rootPart = currentRoot
 		if not (character and humanoid and rootPart) then
 			return
 		end
@@ -2656,7 +2735,7 @@ do
 
 		local cam = workspace.CurrentCamera
 		local ray = cam:ScreenPointToRay(_input.Position.X, _input.Position.Y)
-		local hit = workspace:Raycast(ray.Origin, ray.Direction * MAX_CLICK_DISTANCE, params)
+		local hit = getFirstOpaqueHit(ray.Origin, ray.Direction, params)
 		if not hit then
 			return
 		end
@@ -3223,7 +3302,7 @@ createCommand({ "fling" }, {
 	{ name = "target", type = "player" },
 }, function(args)
 	local target = args.target
-	local root = currentCharacter:WaitForChild("HumanoidRootPart", 5)
+	local root = currentRoot
 
 	spoofProperty(root, "Velocity")
 	spoofProperty(root, "Anchored")
@@ -3429,6 +3508,27 @@ createCommand({ "gravity" }, {
 	spoofProperty(workspace, "Gravity")
 	workspace.Gravity = args.value
 end, "Sets the workspace gravity.")
+
+createCommand({ "spin" }, {
+	{ name = "value", type = "number" },
+}, function(args)
+	if currentRoot:FindFirstChild("Spin") then
+		currentRoot:FindFirstChild("Spin"):Destroy()
+	end
+
+	if args.value >= 0 then
+		create("BodyAngularVelocity", "Spin", {
+			Parent = currentRoot,
+			MaxTorque = Vector3.new(0, math.huge, 0),
+			AngularVelocity = Vector3.new(0, args.value, 0),
+		})
+
+		notify("Started spinning!")
+		return
+	end
+
+	notify("Value must be greater than 0!")
+end, "Makes your character spin.")
 
 local ascending, descending = false, false
 do
