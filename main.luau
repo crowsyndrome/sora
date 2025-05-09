@@ -191,7 +191,7 @@ local function disconnectAllManagedConnections()
 end
 
 local function httpGetJson(url)
-	local ok, raw = pcall(game.HttpGet, url)
+	local ok, raw = pcall(game.HttpGet, game, url)
 	if not ok then
 		return nil
 	end
