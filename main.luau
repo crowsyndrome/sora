@@ -2720,6 +2720,84 @@ do
 	end)
 end
 
+local RECORD_INTERVAL = 0.10 -- seconds per keyframe   (10 Hz record & rewind)
+local HISTORY_HOURS = 3 -- hours of history kept
+do
+	local SAMPLE_COUNT = math.ceil((HISTORY_HOURS * 3600) / RECORD_INTERVAL)
+	local buffer = table.create(SAMPLE_COUNT) -- pre‑allocate ring
+	local head, size = 0, 0 -- next write slot & fill size
+
+	local function push(cf)
+		head = (head % SAMPLE_COUNT) + 1
+		buffer[head] = cf
+		size = size < SAMPLE_COUNT and (size + 1) or SAMPLE_COUNT
+	end
+
+	local recordingAcc = 0
+	local rewinding = false
+	local segTime = 0 -- time spent inside current segment
+	local segHead = 0 -- index of the *later* keyframe in segment
+
+	local function isAltDown()
+		return UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt)
+	end
+
+	addConnection(UserInputService.InputBegan, function(_input, gameProcessed)
+		if gameProcessed or _input.KeyCode ~= Enum.KeyCode.R or not isAltDown() or size < 2 then
+			return
+		end
+
+		segTime = 0
+		rewinding, segHead = true, head
+		currentRoot.Anchored, currentHumanoid.AutoRotate = true, false
+	end)
+
+	addConnection(UserInputService.InputEnded, function(_input, _)
+		if _input.KeyCode == Enum.KeyCode.R then
+			rewinding = false
+			currentRoot.Anchored, currentHumanoid.AutoRotate = false, true
+		end
+	end)
+
+	addConnection(RunService.Heartbeat, function(dt)
+		local humanoid = currentHumanoid
+		local root = currentRoot
+		if humanoid:GetState() == Enum.HumanoidStateType.Dead then
+			return
+		end
+
+		if rewinding then
+			segTime += dt
+			while segTime >= RECORD_INTERVAL do
+				segTime -= RECORD_INTERVAL
+				segHead = (segHead - 1 <= 0) and size or (segHead - 1)
+				if segHead == head then
+					segTime = 0
+					break
+				end
+			end
+
+			local nextIdx = (segHead - 1 <= 0) and size or (segHead - 1)
+			local cfLater = buffer[segHead] -- later frame (current index)
+			local cfEarly = buffer[nextIdx] -- earlier frame
+			local alpha = segTime / RECORD_INTERVAL
+			root.CFrame = cfLater:Lerp(cfEarly, alpha)
+
+			return
+		end
+
+		recordingAcc += dt
+		if recordingAcc >= RECORD_INTERVAL then
+			recordingAcc -= RECORD_INTERVAL
+			push(root.CFrame)
+		end
+	end)
+
+	addConnection(Player.CharacterAdded, function()
+		head, size, rewinding = 0, 0, false
+	end)
+end
+
 local MAX_CLICK_DISTANCE = 1500
 local VALIDATE_HEIGHT = 3
 do
