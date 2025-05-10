@@ -1,7 +1,7 @@
 --[[
-	Sora - Lightweight and extensible Roblox utility
-	https://github.com/crowsyndrome/sora
-]]
+		Sora - Lightweight and extensible Roblox utility
+		https://github.com/crowsyndrome/sora
+	]]
 
 if not game:IsLoaded() then
 	game.Loaded:Wait()
@@ -14,21 +14,34 @@ end
 
 getgenv().SORA_LOADED = true
 
+local start = tick()
 local Sora = {
 	keys = {
-		prefix = Enum.KeyCode.Quote,
-		teleport = Enum.KeyCode.LeftAlt,
-		boost = Enum.KeyCode.C,
-		extra_boost = Enum.KeyCode.LeftControl,
-		alt_dash = Enum.KeyCode.LeftAlt,
+		prefix = "Quote",
+		teleport = "LeftAlt",
+		boost = "C",
+		extra_boost = "LeftControl",
 	},
 	customization = {
-		accent = Color3.fromRGB(131, 195, 248),
+		accent = { 131, 195, 248 },
 		notificationSound = "rbxassetid://89087762338808",
 		bootSound = "rbxassetid://136242004757394",
 		font = "rbxasset://fonts/families/SourceSansPro.json",
+		notificationLength = 5,
 	},
-	start = tick(),
+	features = {
+		bootSoundEnabled = true,
+		notificationSoundEnabled = true,
+		notificationVolume = 0.4,
+		notifyJoin = true,
+		notifyLeave = true,
+		notifyRejoin = true,
+		clickTeleport = true,
+		boost = true,
+		boostSpeed = 125,
+		boostExtraSpeed = 250,
+		enhancedDisplays = false,
+	},
 }
 
 local Services = setmetatable({}, {
@@ -102,10 +115,160 @@ local cloneref = cloneref or function(o)
 	return o
 end
 
-local function animate(object, speed, easingStyle, properties, easingDirection)
-	local actualEasingDirection = easingDirection or Enum.EasingDirection.Out
+local Profile = {}
+Profile.__index = Profile
+do
+	local PROFILE_FOLDER = "sora"
+	if not isfolder(PROFILE_FOLDER) then
+		makefolder(PROFILE_FOLDER)
+	end
 
-	local info = TweenInfo.new(speed, Enum.EasingStyle[easingStyle], Enum.EasingDirection[actualEasingDirection])
+	-- Deep-merge defaults into data
+	local function deepMerge(defaults, data)
+		for k, v in defaults do
+			if type(v) == "table" then
+				if type(data[k]) ~= "table" then
+					data[k] = {}
+				end
+
+				deepMerge(v, data[k])
+			else
+				if data[k] == nil then
+					data[k] = v
+				end
+			end
+		end
+	end
+
+	-- Split a dot-separated key into parts
+	local function splitKey(key)
+		local parts = {}
+		for part in string.gmatch(key, "([^.]+)") do
+			insert(parts, part)
+		end
+		return parts
+	end
+
+	-- Get nested table and key
+	local function getContainer(tbl, parts)
+		local current = tbl
+		for i = 1, #parts - 1 do
+			local part = parts[i]
+			if type(current[part]) ~= "table" then
+				return nil, parts[#parts]
+			end
+
+			current = current[part]
+		end
+
+		return current, parts[#parts]
+	end
+
+	function Profile.new(name, defaults)
+		local path = PROFILE_FOLDER .. "/" .. name .. ".json"
+		local data = {}
+
+		if isfile(path) then
+			local raw = readfile(path)
+			local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
+			if ok and type(decoded) == "table" then
+				data = decoded
+			else
+				warn(("Profile '%s': failed to decode JSON, re-initializing defaults"):format(name))
+			end
+		end
+
+		deepMerge(defaults, data)
+
+		if not isfile(path) then
+			writefile(path, HttpService:JSONEncode(data))
+		end
+
+		local self = setmetatable({
+			name = name,
+			path = path,
+			data = data,
+			defaults = defaults,
+		}, Profile)
+
+		return self
+	end
+
+	function Profile:get(key)
+		if type(key) == "string" and string.find(key, "%.") then
+			local parts = splitKey(key)
+			local tbl = self.data
+			for _, part in parts do
+				if type(tbl) ~= "table" then
+					return nil
+				end
+
+				tbl = tbl[part]
+			end
+
+			return tbl
+		else
+			return self.data[key]
+		end
+	end
+
+	function Profile:set(key, value)
+		if type(key) == "string" and string.find(key, "%.") then
+			local parts = splitKey(key)
+			local container, lastKey = getContainer(self.data, parts)
+			if not container then
+				error(("Profile '%s': cannot set nested key '%s' - path invalid"):format(self.name, key))
+			end
+			container[lastKey] = value
+		else
+			self.data[key] = value
+		end
+		self:save()
+	end
+
+	function Profile:save()
+		local ok, err = pcall(function()
+			writefile(self.path, HttpService:JSONEncode(self.data))
+		end)
+
+		if not ok then
+			error(("Profile '%s': failed to save: %s"):format(self.name, tostring(err)))
+		end
+	end
+
+	function Profile:reload()
+		if not isfile(self.path) then
+			warn(("Profile '%s': file does not exist, skipping reload"):format(self.name))
+			return
+		end
+
+		local raw = readfile(self.path)
+		local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
+		if ok and type(decoded) == "table" then
+			self.data = decoded
+		else
+			warn(("Profile '%s': failed to decode on reload, keeping current data"):format(self.name))
+		end
+	end
+
+	function Profile:reset()
+		self.data = {}
+		deepMerge(self.defaults, self.data)
+		self:save()
+	end
+end
+
+local settings = Profile.new("settings", Sora)
+local accentColor = Color3.fromRGB(unpack(settings:get("customization.accent")))
+
+local function getSettingKeyCode(keycode)
+	return Enum.KeyCode[settings:get("keys")[keycode]]
+end
+
+local function animate(object, speed, easingStyle, properties, easingDirection)
+	local actualEasingDirection = Enum.EasingDirection[easingDirection] or Enum.EasingDirection.Out
+
+	local info = TweenInfo.new(speed, Enum.EasingStyle[easingStyle], actualEasingDirection)
 
 	local tween = TweenService:Create(object, info, properties)
 	tween:Play()
@@ -260,7 +423,6 @@ local NOTIFICATION_HEIGHT = 50
 local NOTIFICATION_GAP = 5
 local BASE_Y_OFFSET = -125
 local START_Y_OFFSET_DELTA = -10
-local VISIBLE_DURATION = 5
 
 local function removeNotificationRecord(instanceToRemove)
 	for i = #activeNotifications, 1, -1 do
@@ -301,18 +463,20 @@ local function notify(...)
 	local endPosition = newUDim2(0.5, 0, 1, targetY)
 	local finalImgTrans = 0.5
 
-	local Sound = create("Sound", "Sound", {
-		RollOffMode = Enum.RollOffMode.InverseTapered,
-		SoundId = Sora.customization.notificationSound,
-		Parent = Player.Character,
-		Volume = 0.4,
-	})
+	if settings:get("features.notificationSoundEnabled") then
+		local Sound = create("Sound", "Sound", {
+			RollOffMode = Enum.RollOffMode.InverseTapered,
+			SoundId = settings:get("customization.notificationSound"),
+			Parent = Player.Character,
+			Volume = settings:get("features.notificationVolume"),
+		})
 
-	Services.Debris:AddItem(Sound, 10)
-	Sound:Play()
+		Services.Debris:AddItem(Sound, 10)
+		Sound:Play()
+	end
 
 	local notifTitle = create("TextLabel", "Title", {
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		TextColor3 = Color3.new(1, 1, 1),
 		TextStrokeColor3 = Color3.new(0.141, 0.141, 0.141),
 		Text = notificationText,
@@ -362,7 +526,7 @@ local function notify(...)
 		fadeInTweenInfo.EasingDirection.Name
 	)
 
-	delay(VISIBLE_DURATION, function()
+	delay(settings:get("customization.notificationLength"), function()
 		if notifTitle and notifTitle.Parent then
 			local fadeOutTween = animate(notifTitle, fadeOutTweenInfo.Time, fadeOutTweenInfo.EasingStyle.Name, {
 				TextTransparency = 1,
@@ -405,7 +569,7 @@ local function makeDraggable(guiObject)
 		return
 	end
 
-	local function toV2(input): Vector2
+	local function toV2(input)
 		return newVector2(input.Position.X, input.Position.Y)
 	end
 
@@ -675,11 +839,11 @@ function Window.new(config)
 		create("TextLabel", "Title", {
 			AutomaticSize = Enum.AutomaticSize.XY,
 			BackgroundTransparency = 1,
-			FontFace = Font.new(Sora.customization.font, Enum.FontWeight.SemiBold, Enum.FontStyle.Normal),
+			FontFace = Font.new(settings:get("customization.font"), Enum.FontWeight.SemiBold, Enum.FontStyle.Normal),
 			Position = newUDim2(0.336106, 0, 0.20776, 0),
 			RichText = true,
 			Text = config.name,
-			TextColor3 = Sora.customization.accent,
+			TextColor3 = accentColor,
 			TextSize = 20,
 			TextStrokeTransparency = 0,
 			TextWrapped = true,
@@ -698,7 +862,7 @@ function Window.new(config)
 			create("ImageLabel", "Icon", {
 				BackgroundTransparency = 1,
 				Image = config.icon,
-				ImageColor3 = Sora.customization.accent,
+				ImageColor3 = accentColor,
 				LayoutOrder = -1,
 				Size = newUDim2(0, 20, 0, 20),
 				Parent = titleRow,
@@ -813,7 +977,7 @@ function Window.addTab(self, name)
 	local title = create("TextButton", "Title", {
 		AutomaticSize = Enum.AutomaticSize.XY,
 		BackgroundTransparency = 1,
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		Position = newUDim2(0.336106, 0, 0.20776, 0),
 		RichText = true,
 		Text = name,
@@ -889,12 +1053,12 @@ function Window.addTab(self, name)
 	insert(self.tabs, tab)
 
 	if #self.tabs == 1 then
-		title.TextColor3 = Sora.customization.accent
-		title.FontFace = Font.new(Sora.customization.font, Enum.FontWeight.SemiBold, Enum.FontStyle.Normal)
+		title.TextColor3 = accentColor
+		title.FontFace = Font.new(settings:get("customization.font"), Enum.FontWeight.SemiBold, Enum.FontStyle.Normal)
 		frame.Visible = true
 		self.selectedFrame = frame
 		scroll.GroupTransparency = 0
-		setBase(title, Sora.customization.accent)
+		setBase(title, accentColor)
 	end
 
 	addConnection(title.MouseEnter, function()
@@ -926,13 +1090,13 @@ function Window.addTab(self, name)
 			local btn = t.Title
 			local neutral = Color3.fromRGB(182, 182, 182)
 			animate(btn, 0.25, easingStyle, { TextColor3 = neutral }, "Out")
-			btn.FontFace = Font.new(Sora.customization.font)
+			btn.FontFace = Font.new(settings:get("customization.font"))
 			setBase(btn, neutral)
 		end
 
-		animate(title, 0.25, easingStyle, { TextColor3 = Sora.customization.accent }, "Out")
-		title.FontFace = Font.new(Sora.customization.font, Enum.FontWeight.SemiBold, Enum.FontStyle.Normal)
-		setBase(title, Sora.customization.accent)
+		animate(title, 0.25, easingStyle, { TextColor3 = accentColor }, "Out")
+		title.FontFace = Font.new(settings:get("customization.font"), Enum.FontWeight.SemiBold, Enum.FontStyle.Normal)
+		setBase(title, accentColor)
 
 		if oldFrame then
 			animate(oldFrame, 0.4, easingStyle, { Position = newUDim2(-dir, dir * 5, 0, 0) }, "Out")
@@ -995,7 +1159,7 @@ function Section.addSection(self, sectionName)
 		create("TextLabel", "Title", {
 			AutomaticSize = Enum.AutomaticSize.XY,
 			BackgroundTransparency = 1,
-			FontFace = Font.new(Sora.customization.font, Enum.FontWeight.SemiBold),
+			FontFace = Font.new(settings:get("customization.font"), Enum.FontWeight.SemiBold),
 			Position = newUDim2(0.336106, 0, 0.20776, 0),
 			RichText = true,
 			Text = sectionName,
@@ -1036,7 +1200,7 @@ function Section.addViewport(self, object, autoSpin)
 		Size = newUDim2(1, 0, 0, 2),
 		BorderSizePixel = 0,
 		ZIndex = 2,
-		BackgroundColor3 = Sora.customization.accent,
+		BackgroundColor3 = accentColor,
 		Parent = viewport,
 	})
 
@@ -1147,7 +1311,7 @@ function Section.addButton(self, buttonName, callback)
 
 	local title = create("TextLabel", "Title", {
 		BackgroundColor3 = Color3.fromRGB(32, 32, 36),
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		Position = newUDim2(0.336106, 0, 0.20776, 0),
 		RichText = true,
 		Size = newUDim2(1, 0, 1, 0),
@@ -1169,7 +1333,7 @@ function Section.addButton(self, buttonName, callback)
 
 	local textbutton = create("TextButton", "TextButton", {
 		BackgroundTransparency = 1,
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		Size = newUDim2(1, 0, 1, 0),
 		Text = "",
 		TextColor3 = Color3.new(),
@@ -1231,7 +1395,7 @@ function Section.addToggle(self, buttonName, callback, defaultState)
 	local title = create("TextLabel", "Title", {
 		AutomaticSize = Enum.AutomaticSize.XY,
 		BackgroundTransparency = 1,
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		Position = newUDim2(0.336106, 0, 0.20776, 0),
 		RichText = true,
 		Text = buttonName,
@@ -1244,7 +1408,7 @@ function Section.addToggle(self, buttonName, callback, defaultState)
 
 	local textbutton = create("TextButton", "TextButton", {
 		BackgroundTransparency = 1,
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		Size = newUDim2(1, 0, 1, 0),
 		Text = "",
 		TextColor3 = Color3.new(),
@@ -1267,7 +1431,7 @@ function Section.addToggle(self, buttonName, callback, defaultState)
 
 	local toggleinner = create("Frame", "ToggleInner", {
 		AnchorPoint = newVector2(0.5, 0.5),
-		BackgroundColor3 = Sora.customization.accent,
+		BackgroundColor3 = accentColor,
 		LayoutOrder = -1,
 		Position = newUDim2(0.5, 0, 0.5, 0),
 		Size = newUDim2(0, 8, 0, 8),
@@ -1289,7 +1453,7 @@ function Section.addToggle(self, buttonName, callback, defaultState)
 	})
 
 	local uistroke = create("UIStroke", "OutlineStroke", {
-		Color = defaultState and Sora.customization.accent or Color3.fromRGB(73, 78, 89),
+		Color = defaultState and accentColor or Color3.fromRGB(73, 78, 89),
 		Parent = outline,
 	})
 
@@ -1310,7 +1474,7 @@ function Section.addToggle(self, buttonName, callback, defaultState)
 				{ Size = newUDim2(0, 8, 0, 8), BackgroundTransparency = 0 },
 				"Out"
 			)
-			animate(uistroke, easingTime, easingStyle, { Color = Sora.customization.accent }, "Out")
+			animate(uistroke, easingTime, easingStyle, { Color = accentColor }, "Out")
 		else
 			callback(false)
 			animate(
@@ -1356,7 +1520,7 @@ function Section.addEntry(self, titleText, desc, subtext)
 	create("TextLabel", "Title", {
 		AutomaticSize = Enum.AutomaticSize.XY,
 		BackgroundTransparency = 1,
-		FontFace = Font.new(Sora.customization.font, Enum.FontWeight.SemiBold, Enum.FontStyle.Normal),
+		FontFace = Font.new(settings:get("customization.font"), Enum.FontWeight.SemiBold, Enum.FontStyle.Normal),
 		RichText = true,
 		Size = newUDim2(1, 0, 0, 0),
 		Text = titleText,
@@ -1383,7 +1547,7 @@ function Section.addEntry(self, titleText, desc, subtext)
 	create("TextLabel", "Description", {
 		AutomaticSize = Enum.AutomaticSize.XY,
 		BackgroundTransparency = 1,
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		RichText = true,
 		Size = newUDim2(1, 0, 0, 0),
 		Text = desc,
@@ -1451,7 +1615,7 @@ function Section.addTextbox(self, placeholder, event, callback)
 	})
 
 	local uistroke = create("UIStroke", "UIStroke", {
-		Color = Sora.customization.accent,
+		Color = accentColor,
 		Thickness = 0,
 		Transparency = 1,
 		Parent = textbox,
@@ -1462,7 +1626,7 @@ function Section.addTextbox(self, placeholder, event, callback)
 		AutomaticSize = Enum.AutomaticSize.XY,
 		BackgroundTransparency = 1,
 		CursorPosition = -1,
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		PlaceholderColor3 = Color3.fromRGB(180, 180, 180),
 		PlaceholderText = tostring(placeholder),
 		RichText = true,
@@ -1500,7 +1664,7 @@ function Section.addTextbox(self, placeholder, event, callback)
 		focused = true
 		animate(uistroke, easingTime, easingStyle, { Thickness = 1 }, "Out")
 		animate(uistroke, easingTime, easingStyle, { Transparency = 0 }, "Out")
-		animate(textbox, easingTime, easingStyle, { BackgroundColor3 = Sora.customization.accent }, "Out")
+		animate(textbox, easingTime, easingStyle, { BackgroundColor3 = accentColor }, "Out")
 		textbox.BackgroundTransparency = 0.85
 	end)
 
@@ -1549,7 +1713,7 @@ function Section.addDropdown(self, values, callback, defaultValue)
 
 	local textbutton = create("TextButton", "TextButton", {
 		BackgroundTransparency = 1,
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		Size = newUDim2(1, 0, 1, 0),
 		Text = "",
 		TextColor3 = Color3.new(),
@@ -1561,7 +1725,7 @@ function Section.addDropdown(self, values, callback, defaultValue)
 	local title = create("TextLabel", "Title", {
 		AutomaticSize = Enum.AutomaticSize.XY,
 		BackgroundTransparency = 1,
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		RichText = true,
 		Size = newUDim2(1, 0, 1, 0),
 		Text = defaultValue or values[1] or "",
@@ -1588,7 +1752,7 @@ function Section.addDropdown(self, values, callback, defaultValue)
 		AnchorPoint = newVector2(1, 0.5),
 		BackgroundTransparency = 1,
 		Image = "rbxassetid://75898830403385",
-		ImageColor3 = Sora.customization.accent,
+		ImageColor3 = accentColor,
 		LayoutOrder = -1,
 		Position = newUDim2(1, -10, 0.5, 0),
 		Size = newUDim2(0, 16, 0, 16),
@@ -1648,8 +1812,8 @@ function Section.addDropdown(self, values, callback, defaultValue)
 
 		local titleLabel = create("TextLabel", "Title", {
 			AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundColor3 = selected and Sora.customization.accent or Color3.fromRGB(35, 35, 39),
-			FontFace = Font.new(Sora.customization.font),
+			BackgroundColor3 = selected and accentColor or Color3.fromRGB(35, 35, 39),
+			FontFace = Font.new(settings:get("customization.font")),
 			Position = newUDim2(0, 0, 0, 0),
 			RichText = true,
 			Size = newUDim2(1, 0, 0, 40),
@@ -1692,7 +1856,7 @@ function Section.addDropdown(self, values, callback, defaultValue)
 
 		local button = create("TextButton", "TextButton", {
 			BackgroundTransparency = 1,
-			FontFace = Font.new(Sora.customization.font),
+			FontFace = Font.new(settings:get("customization.font")),
 			Size = newUDim2(1, 0, 1, 0),
 			Text = "",
 			TextColor3 = Color3.new(),
@@ -1717,7 +1881,7 @@ function Section.addDropdown(self, values, callback, defaultValue)
 			end
 
 			animate(titleLabel, easingTime, easingStyle, { TextColor3 = Color3.fromRGB(0, 0, 0) }, "Out")
-			animate(titleLabel, easingTime, easingStyle, { BackgroundColor3 = Sora.customization.accent }, "Out")
+			animate(titleLabel, easingTime, easingStyle, { BackgroundColor3 = accentColor }, "Out")
 			titleLabel.Gradient.Enabled = true
 			title.Text = name
 			self.selected = name
@@ -1778,7 +1942,7 @@ function Section.addLabel(self, labelText)
 	local Label = create("TextLabel", "Title", {
 		AutomaticSize = Enum.AutomaticSize.XY,
 		BackgroundTransparency = 1,
-		FontFace = Font.new(Sora.customization.font),
+		FontFace = Font.new(settings:get("customization.font")),
 		Position = newUDim2(0.336106, 0, 0.20776, 0),
 		RichText = true,
 		Text = tostring(labelText),
@@ -2123,7 +2287,7 @@ create("UICorner", "Corner", { CornerRadius = UDim.new(0, 8), Parent = runner })
 create("TextLabel", "Title", {
 	LayoutOrder = -1,
 	FontFace = Font.new("rbxassetid://16658246179"),
-	TextColor3 = Sora.customization.accent,
+	TextColor3 = accentColor,
 	Text = format("[sora@%s]", tostring(Player.Name:lower())),
 	BackgroundTransparency = 1,
 	TextTransparency = 1,
@@ -2166,7 +2330,7 @@ local prediction = create("TextLabel", "Prediction", {
 })
 
 create("ImageLabel", "Chevron", {
-	ImageColor3 = Sora.customization.accent,
+	ImageColor3 = accentColor,
 	Image = "rbxassetid://100258505567305",
 	BackgroundTransparency = 1,
 	BorderSizePixel = 0,
@@ -2397,7 +2561,7 @@ local function updatePrediction(txt)
 
 		local prefix = bestAlias:sub(1, #cmdInput)
 		local suffix = bestAlias:sub(#cmdInput + 1)
-		local c = Sora.customization.accent
+		local c = accentColor
 		local hex = format("#%02X%02X%02X", floor(c.R * 255), floor(c.G * 255), floor(c.B * 255))
 
 		sugTitle.RichText = true
@@ -2461,7 +2625,7 @@ local function updatePrediction(txt)
 
 			prediction.Text = string.rep(" ", #txt) .. remainder
 
-			local c = Sora.customization.accent
+			local c = accentColor
 			local hex = format("#%02X%02X%02X", floor(c.R * 255), floor(c.G * 255), floor(c.B * 255))
 
 			local primaryName = target
@@ -2508,7 +2672,7 @@ addConnection(input:GetPropertyChangedSignal("Text"), function()
 
 	_busy = true
 
-	local txt = input.Text:gsub(keyCodeToString(Sora.keys.prefix), "")
+	local txt = input.Text:gsub(keyCodeToString(getSettingKeyCode("prefix")), "")
 	local wantsTrailing = txt:sub(-1) == " "
 	txt = txt
 		:gsub("^%s+", "") -- leading
@@ -2664,58 +2828,57 @@ addConnection(UserInputService.InputBegan, function(entered, gameProcessedEvent)
 		return
 	end
 
-	if entered.KeyCode == Sora.keys.prefix then
+	if entered.KeyCode == getSettingKeyCode("prefix") then
 		delay(0, openRunner)
 	end
 end)
 
-local NORMAL_DASH_SPEED = 125 -- studs/second
-local BOOST_DASH_SPEED = 250 -- studs/second with LeftCtrl
+local dashActive = false
 do
-	local dashActive = false
-	local dashY = nil -- Y we lock to while dashing
-
+	local dashY
 	addConnection(UserInputService.InputBegan, function(_input, gameProcessed)
-		if gameProcessed or _input.KeyCode ~= Sora.keys.boost then
-			return
+		if settings:get("features.boost") then
+			if gameProcessed or _input.KeyCode ~= getSettingKeyCode("boost") then
+				return
+			end
+
+			currentCharacter.Animate.Enabled = false
+			currentCharacter.Animate.Enabled = true
+
+			dashActive = true
+			dashY = currentRoot.Position.Y
+
+			executeCommand("noclip")
 		end
-
-		dashActive = true
-		dashY = currentRoot.Position.Y
-		currentRoot.Anchored = true
-
-		executeCommand("noclip")
 	end)
 
 	addConnection(UserInputService.InputEnded, function(_input, gameProcessed)
-		if gameProcessed or _input.KeyCode ~= Sora.keys.boost then
+		if gameProcessed or _input.KeyCode ~= getSettingKeyCode("boost") then
 			return
 		end
 
 		dashActive = false
-		currentRoot.Anchored = false
-
 		executeCommand("clip")
 	end)
 
-	addConnection(RunService.Heartbeat, function(dt)
-		if not dashActive or not currentHumanoid then
+	addConnection(RunService.Stepped, function()
+		if not dashActive then
 			return
 		end
 
-		local moveDir = currentHumanoid.MoveDirection
-		if moveDir.Magnitude == 0 then
-			return
-		end
+		local dir = currentHumanoid.MoveDirection
+		local speed = (
+			UserInputService:IsKeyDown(getSettingKeyCode("extra_boost"))
+			and settings:get("features.boostExtraSpeed")
+		) or settings:get("features.boostSpeed")
 
-		local speed = UserInputService:IsKeyDown(Sora.keys.extra_boost) and BOOST_DASH_SPEED or NORMAL_DASH_SPEED
-		local disp = newVector3(moveDir.X, 0, moveDir.Z).Unit * speed * dt
+		local horiz = dir.Magnitude > 0 and newVector3(dir.X, 0, dir.Z).Unit * speed or Vector3.zero
+		currentRoot.AssemblyLinearVelocity = newVector3(horiz.X, 0, horiz.Z)
 
-		currentCharacter:TranslateBy(disp)
-
-		if currentRoot.Position.Y ~= dashY then
-			currentRoot.CFrame = newCFrame(currentRoot.Position.X, dashY, currentRoot.Position.Z)
-				* newAngles(0, currentRoot.Orientation.Y * math.pi / 180, 0)
+		if math.abs(currentRoot.Position.Y - dashY) > 0.01 then
+			local position = currentRoot.CFrame.Position
+			currentRoot.CFrame = newCFrame(position.X, dashY, position.Z)
+				* newAngles(0, rad(currentRoot.Orientation.Y), 0)
 		end
 	end)
 end
@@ -2749,13 +2912,13 @@ do
 
 		segTime = 0
 		rewinding, segHead = true, head
-		currentRoot.Anchored, currentHumanoid.AutoRotate = true, false
+		currentHumanoid.AutoRotate = false
 	end)
 
 	addConnection(UserInputService.InputEnded, function(_input, _)
 		if _input.KeyCode == Enum.KeyCode.R then
 			rewinding = false
-			currentRoot.Anchored, currentHumanoid.AutoRotate = false, true
+			currentHumanoid.AutoRotate = true
 		end
 	end)
 
@@ -2806,7 +2969,7 @@ do
 		if downHit then
 			return rootPart.Position.Y - downHit.Position.Y
 		else
-			local humanoid = rootPart.Parent:FindFirstChildOfClass("Humanoid")
+			local humanoid = currentHumanoid
 			return humanoid and (humanoid.HipHeight + rootPart.Size.Y / 2) or 5
 		end
 	end
@@ -2839,7 +3002,7 @@ do
 
 			startCFrame = hitPos + dirUnit * 0.1
 
-			table.insert(params.FilterDescendantsInstances, part)
+			insert(params.FilterDescendantsInstances, part)
 		end
 
 		return nil
@@ -2849,7 +3012,7 @@ do
 		if
 			gameProcessed
 			or _input.UserInputType ~= Enum.UserInputType.MouseButton1
-			or not UserInputService:IsKeyDown(Sora.keys.teleport)
+			or not UserInputService:IsKeyDown(getSettingKeyCode("teleport"))
 		then
 			return
 		end
@@ -2903,8 +3066,11 @@ do
 			end
 		end
 	end
-
-	addConnection(UserInputService.InputBegan, clickTeleport)
+	addConnection(UserInputService.InputBegan, function(_input, gameProcessed)
+		if settings:get("features.clickTeleport") then
+			clickTeleport(_input, gameProcessed)
+		end
+	end)
 end
 
 -- MARK: Commands
@@ -2937,16 +3103,16 @@ do
 
 		queue_on_teleport(format(
 			[[
-        local PlayerAdded, CharacterAdded
-        PlayerAdded = game:GetService("Players").PlayerAdded:Connect(function(Player)
-            CharacterAdded = Player.CharacterAdded:Connect(function(Character)
-				Character:WaitForChild("HumanoidRootPart")
-                Character:PivotTo(CFrame.new(%f, %f, %f))
-                CharacterAdded:Disconnect()
-            end)
-            PlayerAdded:Disconnect()
-        end)
-            ]],
+			local PlayerAdded, CharacterAdded
+			PlayerAdded = game:GetService("Players").PlayerAdded:Connect(function(Player)
+				CharacterAdded = Player.CharacterAdded:Connect(function(Character)
+					Character:WaitForChild("HumanoidRootPart")
+					Character:PivotTo(CFrame.new(%f, %f, %f))
+					CharacterAdded:Disconnect()
+				end)
+				PlayerAdded:Disconnect()
+			end)
+				]],
 			Position.X,
 			Position.Y,
 			Position.Z
@@ -2977,16 +3143,17 @@ local participantStateMap = {
 }
 
 local seenBefore = {}
-do
-	local function resolveName(player)
-		if player.Name == player.DisplayName then
-			return player.Name
-		else
-			return ("%s\n(@%s)"):format(player.DisplayName, player.Name)
-		end
-	end
 
-	local function updateDisplayName(player)
+local function resolveName(player)
+	if player.Name == player.DisplayName then
+		return player.Name
+	else
+		return ("%s\n(@%s)"):format(player.DisplayName, player.Name)
+	end
+end
+
+local function updateDisplayName(player)
+	if settings:get("features.enhancedDisplays") then
 		local char = player.Character
 		local hum = char and char:FindFirstChild("Humanoid")
 		if not hum then
@@ -3005,7 +3172,24 @@ do
 		nameStr = nameStr .. " 🔇"
 		hum.DisplayName = nameStr
 	end
+end
 
+local function updateAll()
+	for _, player in Players:GetPlayers() do
+		seenBefore[player.UserId] = true
+
+		if player.Character and player.Character:FindFirstChild("Humanoid") then
+			updateDisplayName(player)
+		end
+
+		player.CharacterAdded:Connect(function(char)
+			char:WaitForChild("Humanoid", 5)
+			updateDisplayName(player)
+		end)
+	end
+end
+
+do
 	for _, userId in VoiceChatInternal:GetParticipants() or {} do
 		insert(participantStateMap, userId)
 
@@ -3074,30 +3258,27 @@ do
 		end
 
 		if seenBefore[player.UserId] then
-			notify(color.italic(resolveTitleName(player) .. " has rejoined the game"))
+			if settings:get("features.notifyRejoin") then
+				notify(color.italic(resolveTitleName(player) .. " has rejoined the game"))
+			end
 		else
 			seenBefore[player.UserId] = true
+
+			if settings:get("features.notifyJoin") then
+				notify(color.italic(resolveTitleName(player) .. " has joined the game"))
+			end
 		end
 	end)
 
 	addConnection(Players.PlayerRemoving, function(player)
-		notify(color.italic(resolveTitleName(player) .. " has left the game"))
+		if settings:get("features.notifyLeave") then
+			notify(color.italic(resolveTitleName(player) .. " has left the game"))
+		end
 
 		seenBefore[player.UserId] = true
 	end)
 
-	for _, player in Players:GetPlayers() do
-		seenBefore[player.UserId] = true
-
-		if player.Character and player.Character:FindFirstChild("Humanoid") then
-			updateDisplayName(player)
-		end
-
-		player.CharacterAdded:Connect(function(char)
-			char:WaitForChild("Humanoid", 5)
-			updateDisplayName(player)
-		end)
-	end
+	updateAll()
 end
 
 local soundHats = {
@@ -4660,14 +4841,193 @@ createCommand({ "info", "playerinfo" }, {
 	end
 end, "Show extended profile, social stats, friends, groups, and accessories for a player.")
 
-local bootSound = create("Sound", "Sound", {
-	RollOffMode = Enum.RollOffMode.InverseTapered,
-	SoundId = Sora.customization.bootSound,
-	Parent = Player.Character,
-	Volume = 0.4,
-})
+local function toTitleCase(snakeStr)
+	local words = {}
+	for word in string.gmatch(snakeStr, "[^_]+") do
+		local _lower = lower(word)
+		local capitalized = string.upper(string.sub(_lower, 1, 1)) .. string.sub(_lower, 2)
 
-local elapsed = tick() - Sora.start
+		insert(words, capitalized)
+	end
+
+	return concat(words, " ")
+end
+
+createCommand({ "settings", "config" }, nil, function()
+	local win = Window.new({
+		name = "Settings",
+		icon = "rbxassetid://119339965149654",
+		size = newUDim2(0, 450, 0, 500),
+	})
+
+	local generalTab = win:addTab("General")
+	do
+		local keySection = generalTab:addSection("Keybinds")
+		for keyName, _ in Sora.keys do
+			keySection:addTextbox(
+				toTitleCase(keyName) .. " (" .. settings:get("keys." .. keyName) .. ")",
+				"FocusLost",
+				function(txt)
+					if #txt > 0 then
+						settings:set("keys." .. keyName, txt)
+					end
+				end
+			)
+		end
+
+		local custSection = generalTab:addSection("Customization")
+		custSection:addTextbox(
+			("Accent color (hex or r,g,b) - (#%02X%02X%02X)"):format(table.unpack(settings:get("customization.accent"))),
+			"FocusLost",
+			function(txt)
+				txt = txt:match("^%s*(.-)%s*$")
+
+				local r, g, b
+				local hex = txt:gsub("^#", "") -- strip leading #
+				if hex:match("^[%x]+$") then -- only hex chars?
+					if #hex == 3 then -- #abc ➟ #aabbcc
+						hex = hex:gsub(".", "%1%1")
+					end
+
+					if #hex == 6 then
+						r = tonumber(hex:sub(1, 2), 16)
+						g = tonumber(hex:sub(3, 4), 16)
+						b = tonumber(hex:sub(5, 6), 16)
+					elseif #hex == 8 and txt:sub(1, 2) == "0x" then
+						-- 0xAARRGGBB or 0xRRGGBB? (keep simplest: assume RRGGBB)
+						r = tonumber(hex:sub(3, 4), 16)
+						g = tonumber(hex:sub(5, 6), 16)
+						b = tonumber(hex:sub(7, 8), 16)
+					end
+				end
+
+				if not r then
+					local parts = {}
+					for num in txt:gmatch("%d+") do
+						parts[#parts + 1] = tonumber(num)
+					end
+					if #parts == 3 and parts[1] <= 255 and parts[2] <= 255 and parts[3] <= 255 then
+						r, g, b = table.unpack(parts)
+					end
+				end
+
+				if r and g and b then
+					settings:set("customization.accent", { r, g, b })
+				else
+					warn(("Accent colour: '%s' is invalid - keeping previous value"):format(txt))
+				end
+			end
+		)
+
+		custSection:addTextbox("Notification Sound ID", "FocusLost", function(txt)
+			if #txt > 0 then
+				settings:set("customization.notificationSound", txt)
+			end
+		end)
+
+		custSection:addTextbox("Boot Sound ID", "FocusLost", function(txt)
+			if #txt > 0 then
+				settings:set("customization.bootSound", txt)
+			end
+		end)
+
+		custSection:addTextbox("Font ID", "FocusLost", function(txt)
+			if #txt > 0 then
+				settings:set("customization.font", txt)
+			end
+		end)
+
+		local ctrlSection = generalTab:addSection("Controls")
+		ctrlSection:addButton("Reset to Defaults", function()
+			settings:reset()
+			notify("Settings have been reset to defaults.")
+		end)
+
+		ctrlSection:addButton("Reload", function()
+			executeCommand("reload")
+		end)
+	end
+
+	local notifTab = win:addTab("Notifications")
+	do
+		local notifSection = notifTab:addSection("Notification Settings")
+		notifSection:addTextbox(
+			"Notification Length (" .. settings:get("customization.notificationLength") .. "s)",
+			"FocusLost",
+			function(txt)
+				local v = tonumber(txt)
+				if v then
+					settings:set("customization.notificationLength", v)
+				end
+			end
+		)
+		notifSection:addToggle("Notification Sound Enabled", function(on)
+			settings:set("features.notificationSoundEnabled", on)
+		end, settings:get("features.notificationSoundEnabled"))
+		notifSection:addTextbox(
+			"Notification Volume (" .. settings:get("features.notificationVolume") .. ")",
+			"FocusLost",
+			function(txt)
+				local v = tonumber(txt)
+				if v then
+					settings:set("features.notificationVolume", v)
+				end
+			end
+		)
+	end
+
+	local featTab = win:addTab("Features")
+	do
+		local featSection = featTab:addSection("Feature Options")
+		featSection:addToggle("Enhanced Display Names", function(on)
+			settings:set("features.enhancedDisplays", on)
+
+			updateAll()
+		end, settings:get("features.enhancedDisplays"))
+
+		featSection:addToggle("Boot Sound Enabled", function(on)
+			settings:set("features.bootSoundEnabled", on)
+		end, settings:get("features.bootSoundEnabled"))
+
+		featSection:addToggle("Player Join Notifications", function(on)
+			settings:set("features.notifyJoin", on)
+		end, settings:get("features.notifyJoin"))
+
+		featSection:addToggle("Player Leave Notifications", function(on)
+			settings:set("features.notifyLeave", on)
+		end, settings:get("features.notifyLeave"))
+
+		featSection:addToggle("Player Rejoin Notifications", function(on)
+			settings:set("features.notifyRejoin", on)
+		end, settings:get("features.notifyRejoin"))
+
+		featSection:addToggle("Click Teleport", function(on)
+			settings:set("features.clickTeleport", on)
+		end, settings:get("features.clickTeleport"))
+
+		featSection:addToggle("Boost", function(on)
+			settings:set("features.boost", on)
+		end, settings:get("features.boost"))
+
+		featSection:addTextbox("Boost Speed (" .. settings:get("features.boostSpeed") .. ")", "FocusLost", function(txt)
+			if #txt > 0 then
+				settings:set("features.boostSpeed", txt)
+			end
+		end)
+
+		featSection:addTextbox(
+			"Boost Extra Speed (" .. settings:get("features.boostExtraSpeed") .. ")",
+			"FocusLost",
+			function(txt)
+				if #txt > 0 then
+					settings:set("features.boostEXtraSpeed", txt)
+				end
+			end
+		)
+	end
+end, "Opens the Settings UI.")
+
+local elapsed = tick() - start
 do
 	local value, unit, fmt
 	if elapsed < 1e-3 then
@@ -4681,6 +5041,16 @@ do
 	local message =
 		format(color.italic("Sora loaded in " .. color.yellow(fmt) .. " %s"), value, color.italic(color.yellow(unit)))
 
-	bootSound:Play()
+	if settings:get("features.bootSoundEnabled") then
+		local bootSound = create("Sound", "Sound", {
+			RollOffMode = Enum.RollOffMode.InverseTapered,
+			SoundId = settings:get("customization.bootSound"),
+			Parent = Player.Character,
+			Volume = 0.4,
+		})
+
+		bootSound:Play()
+	end
+
 	notify(message)
 end
