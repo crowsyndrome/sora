@@ -27,6 +27,7 @@ local Sora = {
 		notificationSound = "rbxassetid://89087762338808",
 		bootSound = "rbxassetid://136242004757394",
 		font = "rbxasset://fonts/families/SourceSansPro.json",
+		scriptDisplay = "sora",
 		notificationLength = 5,
 	},
 	features = {
@@ -2290,7 +2291,7 @@ create("TextLabel", "Title", {
 	LayoutOrder = -1,
 	FontFace = Font.new("rbxassetid://16658246179"),
 	TextColor3 = accentColor,
-	Text = format("[sora@%s]", tostring(Player.Name:lower())),
+	Text = format("[%s@%s]", settings:get("customization.scriptDisplay"), tostring(Player.Name:lower())),
 	BackgroundTransparency = 1,
 	TextTransparency = 1,
 	TextXAlignment = Enum.TextXAlignment.Left,
@@ -4921,6 +4922,12 @@ createCommand({ "settings", "config" }, nil, function()
 			end
 		)
 
+		custSection:addTextbox("Script Display Name", "FocusLost", function(txt)
+			if #txt > 0 then
+				settings:set("customization.scriptDisplay", txt)
+			end
+		end)
+
 		custSection:addTextbox("Notification Sound ID", "FocusLost", function(txt)
 			if #txt > 0 then
 				settings:set("customization.notificationSound", txt)
@@ -5040,8 +5047,12 @@ do
 		value, unit, fmt = elapsed, "s", "%.3f"
 	end
 
-	local message =
-		format(color.italic("Sora loaded in " .. color.yellow(fmt) .. " %s"), value, color.italic(color.yellow(unit)))
+	local message = format(
+		color.italic("%s loaded in " .. color.yellow(fmt) .. " %s"),
+		toTitleCase(settings:get("customization.scriptDisplay")),
+		value,
+		color.italic(color.yellow(unit))
+	)
 
 	if settings:get("features.bootSoundEnabled") then
 		local bootSound = create("Sound", "Sound", {
