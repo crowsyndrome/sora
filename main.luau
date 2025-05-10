@@ -42,6 +42,8 @@ local Sora = {
 		boostSpeed = 125,
 		boostExtraSpeed = 250,
 		enhancedDisplays = false,
+		groqKey = nil,
+		chosenModel = nil,
 	},
 }
 
@@ -553,6 +555,89 @@ local function notify(...)
 			removeNotificationRecord(notifTitle)
 		end
 	end)
+end
+
+local translator = {
+	apiKey = settings:get("features.groqKey"),
+	endpoint = "https://api.groq.com/openai/v1/chat/completions",
+	temperature = 0,
+	top_p = 0.95,
+	maxTokens = 4096,
+	stop = { "\n<think>" },
+}
+
+function translate(text, targetLang)
+	if translator.apiKey == "" or nil then
+		notify("You must have a valid Groq API key.")
+		return
+	end
+
+	local payload = {
+		model = settings:get("features.chosenModel"),
+		stream = false,
+		max_completion_tokens = translator.maxTokens,
+		temperature = translator.temperature,
+		top_p = translator.top_p,
+		stop = translator.stop,
+		messages = {
+			{
+				role = "system",
+				content = "translate the given message. "
+					.. 'output into JSON format with "direct" and "phonetic" for phonetic pronunciation. '
+					.. "Phonetic should not be an array. For foreign languages return the encoded version of the string. "
+					.. "ONLY OUTPUT THE JSON. OR YOU WILL BE FIRED.",
+			},
+			{
+				role = "user",
+				content = string.format('translate "%s" into %s.', text, targetLang),
+			},
+		},
+	}
+
+	local ok, resp = pcall(function()
+		return request({
+			Url = translator.endpoint,
+			Method = "POST",
+			Headers = {
+				["Content-Type"] = "application/json",
+				["Authorization"] = "Bearer " .. translator.apiKey,
+			},
+			Body = HttpService:JSONEncode(payload),
+		})
+	end)
+
+	if not ok or not (resp and resp.Success) then
+		warn(
+			("[Translator] HTTP request failed%s%s"):format(
+				resp and (" " .. resp.StatusCode) or "",
+				resp and (": " .. resp.Body) or ""
+			)
+		)
+		return nil
+	end
+
+	local data = HttpService:JSONDecode(resp.Body)
+	local content = data.choices[1].message.content or ""
+
+	-- strip off any reasoning block entirely, keeping only what's after </think>
+	local afterThink = content:match("</think>(.*)")
+	if afterThink then
+		content = afterThink
+	end
+
+	local jsonStr = content:match("(%b{})")
+	if not jsonStr then
+		warn("[Translator] Could not find JSON:", content)
+		return nil
+	end
+
+	local success, result = pcall(HttpService.JSONDecode, HttpService, jsonStr)
+	if not success then
+		warn("[Translator] Failed to parse JSON:", jsonStr)
+		return nil
+	end
+
+	return result
 end
 
 local orbiting = false
@@ -1382,7 +1467,7 @@ function Section.addToggle(self, buttonName, callback, defaultState)
 
 	local toggle = create("Frame", "Toggle", {
 		BackgroundTransparency = 1,
-		LayoutOrder = -1,
+		LayoutOrder = 0,
 		Size = newUDim2(1, 0, 0, 15),
 		Parent = self.container,
 	})
@@ -4597,6 +4682,7 @@ createCommand({ "servers" }, nil, function()
 
 	local win = Window.new({
 		name = "Servers",
+		icon = "rbxassetid://120863712766073",
 		size = newUDim2(0, 400, 0, 500),
 	})
 
@@ -4738,17 +4824,121 @@ createCommand({ "info", "playerinfo" }, {
 		statSec:addEntry("JumpPower", tostring(jumpPower))
 	end
 
-	do
-		local tab = win:addTab(format("Friends (%d)", #friends))
-		local sec = tab:addSection("Friends List")
+	local PRESENCE_COLOR = {
+		[0] = "#A0A0A0", -- Offline
+		[1] = "#3CA7FF", -- Online
+		[2] = "#28C76F", -- In‑game
+		[3] = "#FFA726", -- Studio
+	}
 
-		if #friends == 0 then
-			sec:addLabel("No friends found")
-		else
-			for _, friend in friends do
-				local disp = (friend.displayName ~= "" and friend.displayName) or friend.name
-				sec:addEntry(disp, "(@" .. friend.name .. ")")
+	local PRESENCE_RANK = {
+		[3] = 1, -- Studio
+		[2] = 2, -- In‑game
+		[1] = 3, -- Online
+		[0] = 4, -- Offline
+	}
+
+	local MAX_USER_IDS_PER_REQUEST = 50
+	local function postJsonPayload(requestUrl, payloadTable)
+		local payloadJson = HttpService:JSONEncode(payloadTable)
+
+		local ok, httpResponse = pcall(request, {
+			Url = requestUrl,
+			Method = "POST",
+			Headers = { ["content-type"] = "application/json" },
+			Body = payloadJson,
+		})
+		if not ok then
+			warn("HTTP request failed:", httpResponse)
+			return nil
+		end
+
+		if httpResponse.StatusCode ~= 200 then
+			warn(
+				("POST %s returned %d\nResponse body:\n%s"):format(
+					requestUrl,
+					httpResponse.StatusCode,
+					tostring(httpResponse.Body)
+				)
+			)
+			return nil
+		end
+
+		local successDecode, decoded = pcall(HttpService.JSONDecode, HttpService, httpResponse.Body)
+		if not successDecode then
+			warn("Failed to decode JSON response:", decoded)
+			return nil
+		end
+
+		return decoded
+	end
+
+	local function getFriendsPresenceMap(friendList)
+		if #friendList == 0 then
+			return {}
+		end
+
+		local allUserIds = {}
+		for _, friend in friendList do
+			local rawId = friend.id or friend.userId
+			local numericId = tonumber(rawId)
+			if numericId then
+				allUserIds[#allUserIds + 1] = numericId
+			else
+				warn("Skipping invalid friend id:", rawId)
 			end
+		end
+
+		local presenceLookup = {}
+		for i = 1, #allUserIds, MAX_USER_IDS_PER_REQUEST do
+			local batch = {}
+			for j = i, math.min(i + MAX_USER_IDS_PER_REQUEST - 1, #allUserIds) do
+				batch[#batch + 1] = allUserIds[j]
+			end
+
+			local response = postJsonPayload("https://presence.roproxy.com/v1/presence/users", { userIds = batch })
+			if response and type(response.userPresences) == "table" then
+				for _, record in response.userPresences do
+					presenceLookup[record.userId] = record.userPresenceType
+				end
+			end
+		end
+
+		return presenceLookup
+	end
+
+	local friendsTab = win:addTab(("Friends (%d)"):format(#friends))
+	local friendsSection = friendsTab:addSection("Friends List")
+
+	if #friends == 0 then
+		friendsSection:addLabel("No friends found")
+	else
+		local presenceMap = getFriendsPresenceMap(friends)
+
+		local displayEntries = {}
+		for _, friend in friends do
+			local presenceType = presenceMap[friend.id] or 0
+			local displayName = (friend.displayName ~= "" and friend.displayName) or friend.name
+
+			insert(displayEntries, {
+				rawName = displayName,
+				userName = friend.name,
+				textColor = PRESENCE_COLOR[presenceType],
+				sortPriority = PRESENCE_RANK[presenceType],
+			})
+		end
+
+		table.sort(displayEntries, function(entryA, entryB)
+			if entryA.sortPriority ~= entryB.sortPriority then
+				return entryA.sortPriority < entryB.sortPriority
+			end
+
+			return entryA.rawName:lower() < entryB.rawName:lower()
+		end)
+
+		for _, friendEntry in displayEntries do
+			local richTextName = ('<font color="%s">%s</font>'):format(friendEntry.textColor, friendEntry.rawName)
+			friendsSection:addEntry(richTextName, "(@" .. friendEntry.userName .. ")")
 		end
 	end
 
@@ -4964,6 +5154,10 @@ createCommand({ "settings", "config" }, nil, function()
 	local notifTab = win:addTab("Notifications")
 	do
 		local notifSection = notifTab:addSection("Notification Settings")
+		notifSection:addToggle("Notification Sound Enabled", function(on)
+			settings:set("features.notificationSoundEnabled", on)
+		end, settings:get("features.notificationSoundEnabled"))
+
 		notifSection:addTextbox(
 			"Notification Length (" .. settings:get("customization.notificationLength") .. "s)",
 			"FocusLost",
@@ -4974,9 +5168,7 @@ createCommand({ "settings", "config" }, nil, function()
 				end
 			end
 		)
-		notifSection:addToggle("Notification Sound Enabled", function(on)
-			settings:set("features.notificationSoundEnabled", on)
-		end, settings:get("features.notificationSoundEnabled"))
+
 		notifSection:addTextbox(
 			"Notification Volume (" .. settings:get("features.notificationVolume") .. ")",
 			"FocusLost",
@@ -4992,6 +5184,7 @@ createCommand({ "settings", "config" }, nil, function()
 	local featTab = win:addTab("Features")
 	do
 		local featSection = featTab:addSection("Feature Options")
+		featSection:addLabel("Quality of Life")
 		featSection:addToggle("Enhanced Display Names", function(on)
 			settings:set("features.enhancedDisplays", on)
 
@@ -5002,6 +5195,7 @@ createCommand({ "settings", "config" }, nil, function()
 			settings:set("features.bootSoundEnabled", on)
 		end, settings:get("features.bootSoundEnabled"))
 
+		featSection:addLabel("Notifiers")
 		featSection:addToggle("Player Join Notifications", function(on)
 			settings:set("features.notifyJoin", on)
 		end, settings:get("features.notifyJoin"))
@@ -5014,6 +5208,7 @@ createCommand({ "settings", "config" }, nil, function()
 			settings:set("features.notifyRejoin", on)
 		end, settings:get("features.notifyRejoin"))
 
+		featSection:addLabel("Movement")
 		featSection:addToggle("Click Teleport", function(on)
 			settings:set("features.clickTeleport", on)
 		end, settings:get("features.clickTeleport"))
@@ -5038,7 +5233,112 @@ createCommand({ "settings", "config" }, nil, function()
 			end
 		)
 	end
+
+	local languageModels = win:addTab("LLM")
+	do
+		local function getModels()
+			local ok, resp = pcall(function()
+				return request({
+					Url = "https://api.groq.com/openai/v1/models",
+					Method = "GET",
+					Headers = {
+						["Authorization"] = "Bearer " .. settings:get("features.groqKey"),
+						["Content-Type"] = "application/json",
+					},
+				})
+			end)
+
+			if not ok or not (resp and resp.Success) then
+				warn(
+					("[getModels] HTTP request failed%s%s"):format(
+						resp and (" " .. resp.StatusCode) or "",
+						resp and (": " .. resp.Body) or ""
+					)
+				)
+				return nil
+			end
+
+			local data = HttpService:JSONDecode(resp.Body)
+			if not data.data or type(data.data) ~= "table" then
+				warn("[getModels] Unexpected response format")
+				return nil
+			end
+
+			local ids = {}
+			for _, model in data.data do
+				print(model)
+				if
+					model.id:find("llama-4", 1, true)
+					or model.id:find("qwen", 1, true)
+					or model.id:find("gemma", 1, true)
+					or model.id:find("mistral", 1, true)
+					or model.id:find("deepseek", 1, true)
+				then
+					insert(ids, model.id)
+				end
+			end
+
+			return ids
+		end
+
+		local modelSection = languageModels:addSection("Model Options")
+		modelSection:addTextbox("Groq API Key", "FocusLost", function(txt)
+			if #txt > 0 then
+				settings:set("features.groqKey", txt)
+			end
+		end)
+
+		if translator.apiKey ~= "" and translator.apiKey ~= nil then
+			modelSection:addDropdown(getModels(), function(txt)
+				settings:set("features.chosenModel", txt)
+			end, "qwen-qwq-32b")
+		end
+	end
 end, "Opens the Settings UI.")
+
+createCommand({ "translate", "tr" }, nil, function()
+	local win = Window.new({
+		name = "Translator",
+		size = newUDim2(0, 450, 0, 500),
+		icon = "rbxassetid://84180609155910",
+	})
+
+	local tab = win:addTab("Translate")
+
+	local source
+	local inputSection = tab:addSection("Input")
+	inputSection:addLabel("Source")
+	inputSection:addTextbox("Text to Translate", "FocusLost", function(text)
+		source = text
+	end)
+
+	inputSection:addLabel("Language")
+	local language
+	inputSection:addTextbox("Language (e.g. spanish)", "FocusLost", function(text)
+		language = text
+	end)
+
+	local resultSection = tab:addSection("Result")
+	inputSection:addButton("Translate", function()
+		if source == "" or language == "" then
+			notify("Please enter both text and target language.")
+			return
+		end
+
+		task.spawn(function()
+			notify("Attempting translation.")
+			local ok, res = pcall(translate, source, language)
+			if not ok or not res then
+				notify("Translation failed. Check your API key and network.")
+				warn(ok, res)
+				return
+			end
+
+			notify("Translation complete!")
+			resultSection:addEntry(res.direct, res.phonetic, source)
+		end)
+	end)
+end, "Opens a translator UI window.")
 
 local elapsed = tick() - start
 do
