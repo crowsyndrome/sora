@@ -720,18 +720,20 @@ local function makeDraggable(guiObject)
 	end)
 
 	addConnection(RunService.RenderStepped, function(deltaTime)
-		local effectiveTargetAngle = 0
-		if dragging then
-			effectiveTargetAngle = targetSwayAngle
+		if orbiting then
+			currentSwayAngle = 0
+			targetSwayAngle = 0
+			guiObject.Rotation = 0
+			return
 		end
 
-		currentSwayAngle = currentSwayAngle + (effectiveTargetAngle - currentSwayAngle) * SWAY_RETURN_SPEED * deltaTime
+		local effectiveTarget = dragging and targetSwayAngle or 0
+		currentSwayAngle += (effectiveTarget - currentSwayAngle) * SWAY_RETURN_SPEED * deltaTime
 		guiObject.Rotation = currentSwayAngle
 
 		if not dragging and math.abs(currentSwayAngle) < 0.01 then
-			currentSwayAngle = 0
+			currentSwayAngle, targetSwayAngle = 0, 0
 			guiObject.Rotation = 0
-			targetSwayAngle = 0
 		end
 	end)
 end
