@@ -758,7 +758,7 @@ function Window.new(config)
 
 	local library = create("CanvasGroup", "Library", {
 		BackgroundColor3 = Color3.fromRGB(18, 18, 20),
-		Position = newUDim2(easingTime, 0, easingTime, 0),
+		Position = newUDim2(0.25, 0, 0.5, 0),
 		Size = config.size,
 		GroupTransparency = 1,
 		AnchorPoint = newVector2(0.5, 0.5),
