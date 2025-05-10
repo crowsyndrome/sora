@@ -42,8 +42,8 @@ local Sora = {
 		boostSpeed = 125,
 		boostExtraSpeed = 250,
 		enhancedDisplays = false,
-		groqKey = nil,
-		chosenModel = nil,
+		geminiKey = nil,
+		geminiModel = nil,
 	},
 }
 
@@ -558,58 +558,61 @@ local function notify(...)
 end
 
 local translator = {
-	apiKey = settings:get("features.groqKey"),
-	endpoint = "https://api.groq.com/openai/v1/chat/completions",
+	apiKey = settings:get("features.geminiKey"),
+	model = "gemini-2.5-flash-preview-04-17",
+	baseUrl = "https://generativelanguage.googleapis.com/v1beta/models/",
 	temperature = 0,
 	top_p = 0.95,
 	maxTokens = 4096,
-	stop = { "\n<think>" },
 }
 
 function translate(text, targetLang)
-	if translator.apiKey == "" or nil then
-		notify("You must have a valid Groq API key.")
-		return
+	if not translator.apiKey or translator.apiKey == "" then
+		notify("You must set a valid Google Gemini API key.")
+		return nil
 	end
 
+	local endpoint = ("%s%s:generateContent?key=%s"):format(translator.baseUrl, translator.model, translator.apiKey)
+
 	local payload = {
-		model = settings:get("features.chosenModel"),
-		stream = false,
-		max_completion_tokens = translator.maxTokens,
-		temperature = translator.temperature,
-		top_p = translator.top_p,
-		stop = translator.stop,
-		messages = {
-			{
-				role = "system",
-				content = "translate the given message. "
-					.. 'output into JSON format with "direct" and "phonetic" for phonetic pronunciation. '
-					.. "Phonetic should not be an array. For foreign languages return the encoded version of the string. "
-					.. "ONLY OUTPUT THE JSON. OR YOU WILL BE FIRED.",
-			},
+		contents = {
 			{
 				role = "user",
-				content = string.format('translate "%s" into %s.', text, targetLang),
+				parts = {
+					{
+						text = string.format(
+							'translate "%s" into %s. '
+								.. 'Return ONLY JSON with keys "direct" and "phonetic" (phonetic as one string).',
+							text,
+							targetLang
+						),
+					},
+				},
 			},
+		},
+
+		generationConfig = {
+			temperature = translator.temperature,
+			topP = translator.top_p,
+			maxOutputTokens = translator.maxTokens,
+			responseMimeType = "text/plain",
 		},
 	}
 
 	local ok, resp = pcall(function()
 		return request({
-			Url = translator.endpoint,
+			Url = endpoint,
 			Method = "POST",
-			Headers = {
-				["Content-Type"] = "application/json",
-				["Authorization"] = "Bearer " .. translator.apiKey,
-			},
+			Headers = { ["Content-Type"] = "application/json" },
 			Body = HttpService:JSONEncode(payload),
 		})
 	end)
 
 	if not ok or not (resp and resp.Success) then
 		warn(
-			("[Translator] HTTP request failed%s%s"):format(
-				resp and (" " .. resp.StatusCode) or "",
+			string.format(
+				"[Translator] HTTP request failed %s%s",
+				resp and ("(" .. resp.StatusCode .. ")") or "",
 				resp and (": " .. resp.Body) or ""
 			)
 		)
@@ -617,17 +620,13 @@ function translate(text, targetLang)
 	end
 
 	local data = HttpService:JSONDecode(resp.Body)
-	local content = data.choices[1].message.content or ""
-
-	-- strip off any reasoning block entirely, keeping only what's after </think>
-	local afterThink = content:match("</think>(.*)")
-	if afterThink then
-		content = afterThink
-	end
+	local content = (((data.candidates or {})[1] or {}).content or {}).parts
+			and ((data.candidates[1].content.parts)[1] or {}).text
+		or ""
 
 	local jsonStr = content:match("(%b{})")
 	if not jsonStr then
-		warn("[Translator] Could not find JSON:", content)
+		warn("[Translator] Could not find JSON in model output:", content)
 		return nil
 	end
 
@@ -636,7 +635,6 @@ function translate(text, targetLang)
 		warn("[Translator] Failed to parse JSON:", jsonStr)
 		return nil
 	end
-
 	return result
 end
 
@@ -5282,17 +5280,17 @@ createCommand({ "settings", "config" }, nil, function()
 		end
 
 		local modelSection = languageModels:addSection("Model Options")
-		modelSection:addTextbox("Groq API Key", "FocusLost", function(txt)
+		modelSection:addTextbox("Google AI Studio API Key", "FocusLost", function(txt)
 			if #txt > 0 then
-				settings:set("features.groqKey", txt)
+				settings:set("features.geminiKey", txt)
 			end
 		end)
 
-		if translator.apiKey ~= "" and translator.apiKey ~= nil then
-			modelSection:addDropdown(getModels(), function(txt)
-				settings:set("features.chosenModel", txt)
-			end, "qwen-qwq-32b")
-		end
+		-- if translator.apiKey ~= "" and translator.apiKey ~= nil then
+		-- 	modelSection:addDropdown(getModels(), function(txt)
+		-- 		settings:set("features.chosenModel", txt)
+		-- 	end, "qwen-qwq-32b")
+		-- end
 	end
 end, "Opens the Settings UI.")
 
