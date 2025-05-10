@@ -1,7 +1,7 @@
 --[[
-		Sora - Lightweight and extensible Roblox utility
-		https://github.com/crowsyndrome/sora
-	]]
+	Sora - Lightweight and extensible Roblox utility
+	https://github.com/crowsyndrome/sora
+]]
 
 if not game:IsLoaded() then
 	game.Loaded:Wait()
