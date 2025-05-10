@@ -3859,7 +3859,11 @@ do
 
 		if currentCharacter then
 			for _, part in currentCharacter:GetChildren() do
-				if part:IsA("BasePart") and part.Name == "Torso" or part.Name == "Head" then
+				if
+					part:IsA("BasePart") and part.Name == "Torso"
+					or part.Name == "UpperTorso"
+					or part.Name == "LowerTorso"
+				then
 					part.CanCollide = true
 				end
 			end
