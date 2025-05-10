@@ -4922,11 +4922,15 @@ createCommand({ "settings", "config" }, nil, function()
 			end
 		)
 
-		custSection:addTextbox("Script Display Name", "FocusLost", function(txt)
-			if #txt > 0 then
-				settings:set("customization.scriptDisplay", txt)
+		custSection:addTextbox(
+			"Script Display Name (" .. settings:get("customization.scriptDisplay") .. ")",
+			"FocusLost",
+			function(txt)
+				if #txt > 0 then
+					settings:set("customization.scriptDisplay", txt)
+				end
 			end
-		end)
+		)
 
 		custSection:addTextbox("Notification Sound ID", "FocusLost", function(txt)
 			if #txt > 0 then
