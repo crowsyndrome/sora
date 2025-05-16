@@ -58,6 +58,7 @@ local Services = setmetatable({}, {
 })
 
 local VoiceChatInternal = Services.VoiceChatInternal
+local VoiceChatService = Services.VoiceChatService
 local UserInputService = Services.UserInputService
 local TeleportService = Services.TeleportService
 local TweenService = Services.TweenService
@@ -3886,7 +3887,10 @@ do
 end
 
 createCommand({ "joinvc", "unsuspend" }, nil, function()
-	VoiceChatService:joinVoice()
+	VoiceChatInternal.LocalPlayerModerated:Connect(function()
+    sleep(2)
+    VoiceChatService:joinVoice()
+end
 end, "Attempts to join the voice chat. Useful for bypassing suspensions.")
 
 createCommand({ "spectate", "spec", "view" }, {
