@@ -3887,6 +3887,8 @@ do
 end
 
 createCommand({ "joinvc", "unsuspend" }, nil, function()
+VoiceChatService:joinVoice()
+
 	VoiceChatInternal.LocalPlayerModerated:Connect(function()
     sleep(2)
     VoiceChatService:joinVoice()
