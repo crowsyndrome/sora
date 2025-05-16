@@ -3885,10 +3885,9 @@ do
 	end, "Disables noclip mode.")
 end
 
--- might come back one day?
--- createCommand({ "joinvc", "unsuspend" }, nil, function()
--- 	VoiceChatService:joinVoice()
--- end, "Attempts to join the voice chat. Useful for bypassing suspensions.")
+createCommand({ "joinvc", "unsuspend" }, nil, function()
+	VoiceChatService:joinVoice()
+end, "Attempts to join the voice chat. Useful for bypassing suspensions.")
 
 createCommand({ "spectate", "spec", "view" }, {
 	{ name = "target", type = "player" },
