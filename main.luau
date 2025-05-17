@@ -3886,13 +3886,17 @@ do
 	end, "Disables noclip mode.")
 end
 
+local unsuspendVC
 createCommand({ "joinvc", "unsuspend" }, nil, function()
-VoiceChatService:joinVoice()
+	VoiceChatService:joinVoice()
 
-	VoiceChatInternal.LocalPlayerModerated:Connect(function()
-    sleep(2)
-    VoiceChatService:joinVoice()
-end
+	if unsuspendVC then
+		unsuspendVC:Disconnect()
+	end
+	unsuspendVC = VoiceChatInternal.LocalPlayerModerated:Connect(function()
+    	sleep(2)
+    	VoiceChatService:joinVoice()
+	end)
 end, "Attempts to join the voice chat. Useful for bypassing suspensions.")
 
 createCommand({ "spectate", "spec", "view" }, {
