@@ -2918,6 +2918,12 @@ addConnection(UserInputService.InputBegan, function(entered, gameProcessedEvent)
 	if entered.KeyCode == getSettingKeyCode("prefix") then
 		delay(0, openRunner)
 	end
+
+	if
+		input:IsFocused() and (entered.KeyCode == Enum.KeyCode.Return or entered.KeyCode == Enum.KeyCode.KeypadEnter)
+	then
+		closeRunner()
+	end
 end)
 
 local dashActive = false
@@ -2955,8 +2961,7 @@ do
 
 		local dir = currentHumanoid.MoveDirection
 		local speed = (
-			UserInputService:IsKeyDown(getSettingKeyCode("extra_boost"))
-			and settings:get("features.boostExtraSpeed")
+			UserInputService:IsKeyDown(getSettingKeyCode("extra_boost")) and settings:get("features.boostExtraSpeed")
 		) or settings:get("features.boostSpeed")
 
 		local horiz = dir.Magnitude > 0 and newVector3(dir.X, 0, dir.Z).Unit * speed or Vector3.zero
@@ -2967,84 +2972,6 @@ do
 			currentRoot.CFrame = newCFrame(position.X, dashY, position.Z)
 				* newAngles(0, rad(currentRoot.Orientation.Y), 0)
 		end
-	end)
-end
-
-local RECORD_INTERVAL = 0.10 -- seconds per keyframe   (10 Hz record & rewind)
-local HISTORY_HOURS = 3 -- hours of history kept
-do
-	local SAMPLE_COUNT = math.ceil((HISTORY_HOURS * 3600) / RECORD_INTERVAL)
-	local buffer = table.create(SAMPLE_COUNT) -- pre‑allocate ring
-	local head, size = 0, 0 -- next write slot & fill size
-
-	local function push(cf)
-		head = (head % SAMPLE_COUNT) + 1
-		buffer[head] = cf
-		size = size < SAMPLE_COUNT and (size + 1) or SAMPLE_COUNT
-	end
-
-	local recordingAcc = 0
-	local rewinding = false
-	local segTime = 0 -- time spent inside current segment
-	local segHead = 0 -- index of the *later* keyframe in segment
-
-	local function isAltDown()
-		return UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt)
-	end
-
-	addConnection(UserInputService.InputBegan, function(_input, gameProcessed)
-		if gameProcessed or _input.KeyCode ~= Enum.KeyCode.R or not isAltDown() or size < 2 then
-			return
-		end
-
-		segTime = 0
-		rewinding, segHead = true, head
-		currentHumanoid.AutoRotate = false
-	end)
-
-	addConnection(UserInputService.InputEnded, function(_input, _)
-		if _input.KeyCode == Enum.KeyCode.R then
-			rewinding = false
-			currentHumanoid.AutoRotate = true
-		end
-	end)
-
-	addConnection(RunService.Heartbeat, function(dt)
-		local humanoid = currentHumanoid
-		local root = currentRoot
-		if humanoid:GetState() == Enum.HumanoidStateType.Dead then
-			return
-		end
-
-		if rewinding then
-			segTime += dt
-			while segTime >= RECORD_INTERVAL do
-				segTime -= RECORD_INTERVAL
-				segHead = (segHead - 1 <= 0) and size or (segHead - 1)
-				if segHead == head then
-					segTime = 0
-					break
-				end
-			end
-
-			local nextIdx = (segHead - 1 <= 0) and size or (segHead - 1)
-			local cfLater = buffer[segHead] -- later frame (current index)
-			local cfEarly = buffer[nextIdx] -- earlier frame
-			local alpha = segTime / RECORD_INTERVAL
-			root.CFrame = cfLater:Lerp(cfEarly, alpha)
-
-			return
-		end
-
-		recordingAcc += dt
-		if recordingAcc >= RECORD_INTERVAL then
-			recordingAcc -= RECORD_INTERVAL
-			push(root.CFrame)
-		end
-	end)
-
-	addConnection(Player.CharacterAdded, function()
-		head, size, rewinding = 0, 0, false
 	end)
 end
 
@@ -3153,6 +3080,7 @@ do
 			end
 		end
 	end
+
 	addConnection(UserInputService.InputBegan, function(_input, gameProcessed)
 		if settings:get("features.clickTeleport") then
 			clickTeleport(_input, gameProcessed)
@@ -3799,6 +3727,24 @@ createCommand({ "jumppower", "jp" }, {
 	end
 end, "Sets the player's jump power.")
 
+createCommand({ "jumpheight", "jh" }, {
+	{ name = "value", type = "number" },
+}, function(args)
+	local humanoid = currentHumanoid
+	if humanoid then
+		spoofProperty(humanoid, "JumpHeight")
+		spoofProperty(humanoid, "UseJumpPower")
+
+		humanoid.UseJumpPower = true
+		humanoid.JumpHeight = args.value
+
+		notify("JumpHeight set to " .. color.cyan(args.value))
+	else
+		notify("Couldn't find humanoid")
+		return
+	end
+end, "Sets the player's jump height.")
+
 local isNoclipEnabled = false
 do
 	local noclipEnabled = false
@@ -3894,8 +3840,8 @@ createCommand({ "joinvc", "unsuspend" }, nil, function()
 		unsuspendVC:Disconnect()
 	end
 	unsuspendVC = VoiceChatInternal.LocalPlayerModerated:Connect(function()
-    	sleep(2)
-    	VoiceChatService:joinVoice()
+		sleep(2)
+		VoiceChatService:joinVoice()
 	end)
 end, "Attempts to join the voice chat. Useful for bypassing suspensions.")
 
@@ -4191,7 +4137,9 @@ createCommand({ "muteallhats", "mah" }, nil, function()
 
 	addConnection(RunService.Stepped, function()
 		for _, sound in soundHats do
-			sound.Playing = false
+			if sound ~= nil then
+				sound.Playing = false
+			end
 		end
 	end)
 
@@ -4721,7 +4669,6 @@ createCommand({ "servers" }, nil, function()
 	local averagePing = 0
 	local totalPing = 0
 
-	-- Calculate average ping
 	for _, server in servers do
 		totalPing = totalPing + server.ping
 	end
@@ -4793,6 +4740,38 @@ createCommand({ "info", "playerinfo" }, {
 	local friends = (httpGetJson(("https://friends.roblox.com/v1/users/%d/friends?limit=100"):format(userId))) or {}
 	friends = friends.data or {}
 
+	local usernameHistory = {}
+	local cursor = nil
+	local baseUsernameHistoryUrl = ("https://users.roblox.com/v1/users/%d/username-history?limit=25&sortOrder=Desc"):format(
+		userId
+	)
+
+	while true do
+		local currentUrl = baseUsernameHistoryUrl
+		if cursor then
+			currentUrl = currentUrl .. "&cursor=" .. cursor
+		end
+
+		local pageData = httpGetJson(currentUrl)
+
+		if pageData and pageData.data and type(pageData.data) == "table" then
+			if #pageData.data == 0 then
+				break
+			end
+
+			for _, entry in pageData.data do
+				insert(usernameHistory, entry)
+			end
+
+			cursor = pageData.nextPageCursor
+			if not cursor then
+				break
+			end
+		else
+			break
+		end
+	end
+
 	local groups = (httpGetJson(("https://groups.roblox.com/v1/users/%d/groups/roles"):format(userId))) or {}
 	groups = groups.data or {}
 
@@ -4828,6 +4807,15 @@ createCommand({ "info", "playerinfo" }, {
 		socSec:addEntry("Followers", tostring(followers))
 		socSec:addEntry("Following", tostring(following))
 
+		local historySec = tab:addSection("Username History")
+		if #usernameHistory > 0 then
+			for _, entry in usernameHistory do
+				historySec:addEntry(entry.name)
+			end
+		else
+			historySec:addLabel("No username history found.")
+		end
+
 		local statSec = tab:addSection("Live Stats")
 		statSec:addEntry("Health", ("%d / %d"):format(health, maxHealth))
 		statSec:addEntry("WalkSpeed", tostring(walkSpeed))
@@ -4858,6 +4846,7 @@ createCommand({ "info", "playerinfo" }, {
 			Headers = { ["content-type"] = "application/json" },
 			Body = payloadJson,
 		})
+
 		if not ok then
 			warn("HTTP request failed:", httpResponse)
 			return nil
