@@ -1,8 +1,8 @@
 <div align="center">
     <img src="assets/icon.png" 
             alt="Picture" 
-            width="150" 
-            height="150" 
+            width="250" 
+            height="250" 
             style="display: block; margin: 0 auto" />
 
 <h1>Sora</h1>
