@@ -4186,8 +4186,7 @@ end, "Enables infinite jumping.")
 
 createCommand({ "muteallhats", "mah" }, nil, function()
 	if Services.SoundService.RespectFilteringEnabled then
-		notify(color.red("You cannot mute sound hats, RespectFilteringEnabled is on"))
-		return
+		notify(color.yellow("SoundService.RespectFilteringEnabled is on, muting won't replicate."))
 	end
 
 	addConnection(RunService.Stepped, function()
