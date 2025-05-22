@@ -4337,7 +4337,7 @@ end
 createCommand({ "reload" }, nil, function()
 	executeCommand("unload")
 
-	loadstring(readfile("admin.luau"))()
+	loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/crowsyndrome/sora/refs/heads/main/main.luau"))()
 	notify("Script reloaded.")
 end, "Unloads and reloads the script.")
 
