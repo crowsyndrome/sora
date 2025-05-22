@@ -49,11 +49,16 @@ local Sora = {
 
 local Services = setmetatable({}, {
 	__index = function(self, serviceName)
-		local service = cloneref(game:GetService(serviceName))
+		local success, service = pcall(function()
+			return cloneref(game:GetService(serviceName))
+		end)
 
-		rawset(self, serviceName, service)
-
-		return service
+		if success then
+			rawset(self, serviceName, service)
+			return service
+		else
+			error("Invalid service name: " .. tostring(serviceName))
+		end
 	end,
 })
 
