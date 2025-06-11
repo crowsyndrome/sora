@@ -3105,7 +3105,12 @@ do
 	createCommand({ "rejoin", "rj" }, nil, function()
 		notify("Rejoining..")
 
-		queue_on_teleport([[game:GetService("ReplicatedFirst"):RemoveDefaultLoadingScreen()]])
+		queue_on_teleport([[
+			local cloneref = (type(cloneref) == "function" and cloneref) or function(obj)
+				return obj
+			end
+			cloneref(game:GetService("ReplicatedFirst")):RemoveDefaultLoadingScreen()
+		]])
 
 		if #Players:GetPlayers() <= 1 then
 			Players.LocalPlayer:Kick("\nRejoining..")
@@ -3123,8 +3128,11 @@ do
 
 		queue_on_teleport(format(
 			[[
+			local cloneref = (type(cloneref) == "function" and cloneref) or function(obj)
+				return obj
+			end
 			local PlayerAdded, CharacterAdded
-			PlayerAdded = game:GetService("Players").PlayerAdded:Connect(function(Player)
+			PlayerAdded = cloneref(game:GetService("Players")).PlayerAdded:Connect(function(Player)
 				CharacterAdded = Player.CharacterAdded:Connect(function(Character)
 					Character:WaitForChild("HumanoidRootPart")
 					Character:PivotTo(CFrame.new(%f, %f, %f))
